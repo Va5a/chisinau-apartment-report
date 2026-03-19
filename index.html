@@ -978,7 +978,7 @@
       </div>
     </div>
     <div class='right'>
-      <button class='toggleBtn' id='showPanelBtn' title='Show the listings panel' style='position:absolute; top:56px; left:10px; z-index:2000; display:none;'>Show panel</button>
+      <button class='toggleBtn' id='showPanelBtn' title='Show the listings panel' style='position:absolute; top:10px; left:54px; z-index:5000; display:none; min-width:96px;'>Show panel</button>
       <div id='map'></div>
     </div>
   </div>
@@ -1287,9 +1287,18 @@
       // Leaflet needs a resize tick after layout changes
       try {
         // multiple ticks: some browsers need >1 frame after flexbox changes
-        setTimeout(()=>map.invalidateSize(), 50);
-        setTimeout(()=>map.invalidateSize(), 250);
-        setTimeout(()=>map.invalidateSize(), 800);
+        const tick = () => {
+          try { map.invalidateSize(true); } catch(e) {}
+        };
+        // immediate + a few frames later (Leaflet sometimes needs this after flex changes)
+        tick();
+        requestAnimationFrame(tick);
+        requestAnimationFrame(()=>requestAnimationFrame(tick));
+        setTimeout(tick, 50);
+        setTimeout(tick, 250);
+        setTimeout(tick, 800);
+        // If we have bounds, re-fit without animation to force tile relayout
+        try { if (bounds && bounds.isValid()) map.fitBounds(bounds.pad(0.15), {animate:false}); } catch(e) {}
       } catch(e) {}
     }
     if(hideBtn) hideBtn.addEventListener('click', ()=>setPanelVisible(false));
