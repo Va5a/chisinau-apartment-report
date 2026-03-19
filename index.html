@@ -1,0 +1,1281 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset='utf-8'/>
+  <meta name='viewport' content='width=device-width, initial-scale=1'/>
+  <title>Chișinău apartments report</title>
+  <link rel='stylesheet' href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css' integrity='sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=' crossorigin=''/>
+  <script src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js' integrity='sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=' crossorigin=''></script>
+  <script src='https://unpkg.com/osmtogeojson@3.0.0/osmtogeojson.js'></script>
+  <style>
+    body { margin:0; font-family: -apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial; }
+    .wrap { display:flex; height:100vh; width:100vw; overflow:hidden; }
+    .left { width: 520px; max-width: 70vw; min-width: 320px; overflow:auto; padding: 0; box-sizing: border-box; border-right: 1px solid #eee; background:#fff; }
+    .leftInner { padding: 14px; }
+    .right { flex:1; position: relative; }
+
+    /* Mobile / narrow screens: stack list above map */
+    @media (max-width: 900px) {
+      .wrap { flex-direction: column; }
+      .left { width: 100% !important; max-width: none; min-width: 0; height: 55vh; border-right:none; border-bottom: 1px solid #eee; }
+      .right { height: 45vh; }
+    }
+
+    .leftHeader { position: sticky; top: 0; background: #fff; border-bottom: 1px solid #eee; padding: 10px 14px; z-index: 10; }
+    .leftHeaderTop { display:flex; align-items:center; justify-content: space-between; gap: 10px; }
+    .toggleBtn { border:1px solid #ddd; background:#fff; border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor:pointer; }
+    .toggleBtn:hover { border-color:#cbd5e1; }
+
+    #map { height:100%; width:100%; }
+    .card { border:1px solid #eee; border-radius:10px; padding:10px 12px; margin:10px 0; cursor:pointer; }
+    .card:hover { border-color:#cbd5e1; box-shadow: 0 1px 8px rgba(0,0,0,0.06); }
+    .card.selected { border-color:#2563eb; box-shadow: 0 0 0 2px rgba(37,99,235,0.15); }
+    .rank { font-size:12px; color:#666; }
+    .title { font-weight:600; margin-top:4px; }
+    .meta { color:#333; font-size:12px; margin-top:4px; }
+    .badges { margin-top:6px; display:flex; gap:6px; flex-wrap:wrap; }
+    .badge { display:inline-block; font-size:11px; padding:2px 8px; border-radius: 999px; border:1px solid #ddd; background:#f8fafc; }
+    .badge-terrace { border-color:#0ea5e9; background: rgba(14,165,233,0.10); }
+    .badge-parking { border-color:#10b981; background: rgba(16,185,129,0.10); }
+    .badge-quiet { border-color:#f97316; background: rgba(249,115,22,0.12); }
+    .links { font-size:12px; margin-top:6px; }
+    .summary { font-size:13px; margin-top:8px; line-height:1.35; }
+    .warn { margin-top:6px; font-size:12px; color:#b00020; font-weight:600; }
+
+    /* Facts box styling */
+    .facts { margin: 8px 0; padding: 8px 10px; border: 1px solid #e5e7eb; border-radius: 10px; background: #fafafa; }
+    .factsLabel { font-size: 12px; color:#111827; margin-bottom: 6px; }
+    .facts ul { margin: 0 0 0 18px; padding: 0; }
+  </style>
+</head>
+<body>
+  <div class='wrap'>
+    <div class='left' id='leftPane'>
+      <div class='leftHeader' id='leftHeader'>
+        <div class='leftHeaderTop'>
+          <div>
+            <div style='font-weight:700'>Chișinău apartment report</div>
+            <div style='color:#444; font-size:12px; margin-top:2px'>Listings (left) + Leaflet map (right). Click a listing to zoom/highlight the marker; click a marker to jump to the listing.</div>
+          </div>
+        </div>
+        <div style='margin-top:8px; font-size:12px; color:#333'>
+          <b>What you’re seeing:</b> apartments for purchase (source-specific). Sector borders are approximate OSM admin relations.
+          <b>Late-evening busyness</b> is a <b>composite proxy</b> within ~300m: food/drink density + transit density + culture venues + plaza/pedestrian-zone signal + pedestrian-friendly street length.
+        </div>
+        <div style='margin-top:8px; display:flex; gap:12px; flex-wrap:wrap; align-items:center; font-size:12px; color:#333'>
+          <label style='display:flex; align-items:center; gap:6px; cursor:pointer'>
+            <input type='checkbox' id='filterParking'/> <span>Garage/Parking</span>
+          </label>
+          <label style='display:flex; align-items:center; gap:6px; cursor:pointer'>
+            <input type='checkbox' id='filterTerrace'/> <span>Terrace/Outdoor</span>
+          </label>
+          <label style='display:flex; align-items:center; gap:6px; cursor:pointer'>
+            <input type='checkbox' id='filterLively'/> <span>Lively evenings only</span>
+          </label>
+          <span style='color:#666'>(filters)</span>
+        </div>
+
+        <div style='margin-top:10px; font-size:11px; color:#333'>
+          <div style='font-size:11px; color:#444'>
+            <b>Overlays (100m grid):</b> each square shows OSM POI counts binned into a 100m×100m grid over Chișinău; color intensity is log-scaled density within that grid cell.
+          </div>
+          <div style='margin-top:6px; display:flex; gap:12px; flex-wrap:wrap; align-items:center'>
+            <label style='display:flex; align-items:center; gap:6px; cursor:pointer'>
+              <input type='checkbox' id='ov_quiet' checked/> <span>Quiet lively (restaurants+cafes)</span> <span id='ov_status_quiet' style='color:#666'></span>
+            </label>
+            <label style='display:flex; align-items:center; gap:6px; cursor:pointer'>
+              <input type='checkbox' id='ov_noisy' checked/> <span>Noisy lively (bars+pubs+clubs)</span> <span id='ov_status_noisy' style='color:#666'></span>
+            </label>
+            <label style='display:flex; align-items:center; gap:6px; cursor:pointer'>
+              <input type='checkbox' id='ov_tour' checked/> <span>Touristic (attractions+hotels)</span> <span id='ov_status_tour' style='color:#666'></span>
+            </label>
+          </div>
+        </div>
+
+        <div style='margin-top:8px; font-size:12px; color:#333; display:flex; gap:14px; flex-wrap:wrap; align-items:center'>
+          <b>Map legend:</b>
+          <span><span style='display:inline-block; width:10px; height:10px; border-radius:50%; background:#3b82f6; border:2px solid #1d4ed8; vertical-align:middle; margin-right:6px'></span>pin confirmed</span>
+          <span><span style='display:inline-block; width:10px; height:10px; border-radius:50%; background:#fbbf24; border:2px solid #a16207; vertical-align:middle; margin-right:6px'></span>pin unconfirmed</span>
+          <span><span style='display:inline-block; width:10px; height:10px; border-radius:50%; background:#ef4444; border:2px solid #b91c1c; vertical-align:middle; margin-right:6px'></span>pin mismatch</span>
+        </div>
+      </div>
+
+      <div class='leftInner'>
+        
+        <div class='card' id='listing-1' data-rank='1' data-has-terrace='true' data-has-parking='true' data-lively='false' data-evening-score='0.0' tabindex='0' role='button' aria-label='Focus map on ranked listing 1'>
+          <div class='rank'>#1</div>
+          <div class='title'>
+            Apartament de vanzare Chisinau, chirie și cumpărare de apartamente în Moldova <span style='font-size:11px; color:#666; font-weight:400'> (Apartament de vanzare Chisinau, chirie și cumpărare de apartamente în Moldova)</span>
+          </div>
+          <div class='meta'> </div>
+          <div class='badges'><span class='badge badge-terrace'>Terrace/Outdoor</span><span class='badge badge-parking'>Garage/Parking</span><span class='badge badge-quiet'>Quiet evenings (proxy)</span></div>
+          
+          <div class='links'><a target='_blank' rel='noreferrer' href='https://999.md/ro/list/real-estate/apartments-and-rooms'><b>Ad</b></a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=47.0449,28.836'>Maps</a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=47.0449,28.836'>Street View</a></div>
+          <div class='summary'>
+            <div class="facts"><div class="factsLabel"><b>FACTS BOX (from the ad)</b></div>
+            <h3>Agent assessment — property (ad-anchored)</h3>
+<p><b>A) What the seller leans on:</b></p>
+<ul><li>No strong seller emphasis could be reliably extracted from the text.</li></ul>
+<p><b>B) Stated vs not stated (be strict):</b></p>
+<ul><li><b>Explicitly stated:</b></li><li>Key building/usage details are not clearly specified in the ad text.</li><li><b>Not stated:</b></li><li>Exact floor level / storey</li><li>Elevator / lift</li><li>Outdoor space (balcony/loggia/terrace/garden)</li><li>Parking / garage availability and terms</li><li>Energy certificate figures (HWB / fGEE)</li><li>Tenancy status (vacant vs rented, end date)</li><li>Furnishing included/excluded</li></ul>
+<p><b>C) Grounded read-between-the-lines:</b></p>
+<ul><li>If the pin is not confirmed, treat nearby-amenity context as approximate and verify the exact micro-location.</li></ul>
+<p><b>D) Viewing questions (bring these):</b></p>
+<ul><li>Which floor is it on, and is there a working elevator? (If yes: from which level?)</li><li>What exactly is included in the monthly costs (utilities, maintenance, building admin), and are there any planned increases?</li><li>Is the apartment vacant on handover, or is there an existing tenancy/occupant?</li><li>What is included in the sale (furniture/appliances), and what is excluded?</li><li>Are there upcoming building works (roof/facade/risers) and what is the reserve fund status (if applicable)?</li><li>If renovation/first-occupancy language is used: what scope is completed and what is still pending? Can you provide a written spec?</li><li>If parking is mentioned: is it included, optional, or just nearby? What are the terms and costs?</li></ul>
+<ul class="facts"><li><b>Area:</b> Chișinău</li></ul></div>
+<h3>Micro-area (local guide)</h3>
+<p>No specific nearby landmarks or transit lines are named in the ad text. Rely on on-the-ground checks (evening noise, walk times) and the report’s generic OSM proxy signals rather than assumed venue proximity.</p>
+<p><b>Do an evening pass:</b> in Chișinău, bus/trolleybus frequency, park-adjacent gatherings, and arterial-road noise can change block-by-block. If possible, check 20:00–23:00 on a weekday and a weekend.</p>
+<h3>Macro-area (local guide)</h3>
+<p><i>General background (not source-verified):</i> Chișinău varies block-by-block. Focus on road noise, building condition, and practical walkability to errands.</p>
+<h3>Orientation</h3>
+<p>Centrality proxy is not available for this listing. Key orientation/access details are not specified (floor, lift).</p>
+            
+          </div>
+        </div>
+        
+        <div class='card' id='listing-2' data-rank='2' data-has-terrace='true' data-has-parking='true' data-lively='false' data-evening-score='0.0' tabindex='0' role='button' aria-label='Focus map on ranked listing 2'>
+          <div class='rank'>#2</div>
+          <div class='title'>
+            Panou de anunțuri - 999.md <span style='font-size:11px; color:#666; font-weight:400'> (Panou de anunțuri - 999.md)</span>
+          </div>
+          <div class='meta'> </div>
+          <div class='badges'><span class='badge badge-terrace'>Terrace/Outdoor</span><span class='badge badge-parking'>Garage/Parking</span><span class='badge badge-quiet'>Quiet evenings (proxy)</span></div>
+          
+          <div class='links'><a target='_blank' rel='noreferrer' href='https://999.md/ro'><b>Ad</b></a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=47.0335,28.8035'>Maps</a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=47.0335,28.8035'>Street View</a></div>
+          <div class='summary'>
+            <div class="facts"><div class="factsLabel"><b>FACTS BOX (from the ad)</b></div>
+            <h3>Agent assessment — property (ad-anchored)</h3>
+<p><b>A) What the seller leans on:</b></p>
+<ul><li>No strong seller emphasis could be reliably extracted from the text.</li></ul>
+<p><b>B) Stated vs not stated (be strict):</b></p>
+<ul><li><b>Explicitly stated:</b></li><li>Key building/usage details are not clearly specified in the ad text.</li><li><b>Not stated:</b></li><li>Exact floor level / storey</li><li>Elevator / lift</li><li>Outdoor space (balcony/loggia/terrace/garden)</li><li>Parking / garage availability and terms</li><li>Energy certificate figures (HWB / fGEE)</li><li>Tenancy status (vacant vs rented, end date)</li><li>Furnishing included/excluded</li></ul>
+<p><b>C) Grounded read-between-the-lines:</b></p>
+<ul><li>If the pin is not confirmed, treat nearby-amenity context as approximate and verify the exact micro-location.</li></ul>
+<p><b>D) Viewing questions (bring these):</b></p>
+<ul><li>Which floor is it on, and is there a working elevator? (If yes: from which level?)</li><li>What exactly is included in the monthly costs (utilities, maintenance, building admin), and are there any planned increases?</li><li>Is the apartment vacant on handover, or is there an existing tenancy/occupant?</li><li>What is included in the sale (furniture/appliances), and what is excluded?</li><li>Are there upcoming building works (roof/facade/risers) and what is the reserve fund status (if applicable)?</li><li>If renovation/first-occupancy language is used: what scope is completed and what is still pending? Can you provide a written spec?</li><li>If parking is mentioned: is it included, optional, or just nearby? What are the terms and costs?</li></ul>
+<ul class="facts"><li><b>Area:</b> Chișinău</li></ul></div>
+<h3>Micro-area (local guide)</h3>
+<p>No specific nearby landmarks or transit lines are named in the ad text. Rely on on-the-ground checks (evening noise, walk times) and the report’s generic OSM proxy signals rather than assumed venue proximity.</p>
+<p><b>Do an evening pass:</b> in Chișinău, bus/trolleybus frequency, park-adjacent gatherings, and arterial-road noise can change block-by-block. If possible, check 20:00–23:00 on a weekday and a weekend.</p>
+<h3>Macro-area (local guide)</h3>
+<p><i>General background (not source-verified):</i> Chișinău varies block-by-block. Focus on road noise, building condition, and practical walkability to errands.</p>
+<h3>Orientation</h3>
+<p>Centrality proxy is not available for this listing. Key orientation/access details are not specified (floor, lift).</p>
+            
+          </div>
+        </div>
+        
+        <div class='card' id='listing-3' data-rank='3' data-has-terrace='true' data-has-parking='true' data-lively='false' data-evening-score='0.0' tabindex='0' role='button' aria-label='Focus map on ranked listing 3'>
+          <div class='rank'>#3</div>
+          <div class='title'>
+            Vânzare apartamente, approx. mere din Chişinău <span style='font-size:11px; color:#666; font-weight:400'> (Vânzare apartamente, camere din Chişinău)</span>
+          </div>
+          <div class='meta'>€114,900 · 51 m2 </div>
+          <div class='badges'><span class='badge badge-terrace'>Terrace/Outdoor</span><span class='badge badge-parking'>Garage/Parking</span><span class='badge badge-quiet'>Quiet evenings (proxy)</span></div>
+          
+          <div class='links'><a target='_blank' rel='noreferrer' href='https://makler.md/md/chisinau/real-estate/real-estate-for-sale/apartments-for-sale?list&amp;list=detail'><b>Ad</b></a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=47.0335,28.8035'>Maps</a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=47.0335,28.8035'>Street View</a></div>
+          <div class='summary'>
+            <div class="facts"><div class="factsLabel"><b>FACTS BOX (from the ad)</b></div>
+            <h3>Agent assessment — property (ad-anchored)</h3>
+<p><b>A) What the seller leans on:</b></p>
+<ul><li>No strong seller emphasis could be reliably extracted from the text.</li></ul>
+<p><b>B) Stated vs not stated (be strict):</b></p>
+<ul><li><b>Explicitly stated:</b></li><li>Key building/usage details are not clearly specified in the ad text.</li><li><b>Not stated:</b></li><li>Exact floor level / storey</li><li>Elevator / lift</li><li>Outdoor space (balcony/loggia/terrace/garden)</li><li>Parking / garage availability and terms</li><li>Energy certificate figures (HWB / fGEE)</li><li>Tenancy status (vacant vs rented, end date)</li><li>Furnishing included/excluded</li></ul>
+<p><b>C) Grounded read-between-the-lines:</b></p>
+<ul><li>If the pin is not confirmed, treat nearby-amenity context as approximate and verify the exact micro-location.</li></ul>
+<p><b>D) Viewing questions (bring these):</b></p>
+<ul><li>Which floor is it on, and is there a working elevator? (If yes: from which level?)</li><li>What exactly is included in the monthly costs (utilities, maintenance, building admin), and are there any planned increases?</li><li>Is the apartment vacant on handover, or is there an existing tenancy/occupant?</li><li>What is included in the sale (furniture/appliances), and what is excluded?</li><li>Are there upcoming building works (roof/facade/risers) and what is the reserve fund status (if applicable)?</li><li>If renovation/first-occupancy language is used: what scope is completed and what is still pending? Can you provide a written spec?</li><li>If parking is mentioned: is it included, optional, or just nearby? What are the terms and costs?</li></ul>
+<ul class="facts"><li><b>Price:</b> €114,900</li>
+<li><b>Size:</b> 51 m2</li>
+<li><b>Area:</b> Chișinău</li></ul></div>
+<h3>Micro-area (local guide)</h3>
+<p>No specific nearby landmarks or transit lines are named in the ad text. Rely on on-the-ground checks (evening noise, walk times) and the report’s generic OSM proxy signals rather than assumed venue proximity.</p>
+<p><b>Do an evening pass:</b> in Chișinău, bus/trolleybus frequency, park-adjacent gatherings, and arterial-road noise can change block-by-block. If possible, check 20:00–23:00 on a weekday and a weekend.</p>
+<h3>Macro-area (local guide)</h3>
+<p><i>General background (not source-verified):</i> Chișinău varies block-by-block. Focus on road noise, building condition, and practical walkability to errands.</p>
+<h3>Orientation</h3>
+<p>Centrality proxy is not available for this listing. Key orientation/access details are not specified (floor, lift).</p>
+            
+          </div>
+        </div>
+        
+        <div class='card' id='listing-4' data-rank='4' data-has-terrace='true' data-has-parking='true' data-lively='false' data-evening-score='0.0' tabindex='0' role='button' aria-label='Focus map on ranked listing 4'>
+          <div class='rank'>#4</div>
+          <div class='title'>
+            Vânzare apartamente, approx. mere din Chişinău <span style='font-size:11px; color:#666; font-weight:400'> (Vânzare apartamente, camere din Chişinău)</span>
+          </div>
+          <div class='meta'>€114,900 · 51 m2 </div>
+          <div class='badges'><span class='badge badge-terrace'>Terrace/Outdoor</span><span class='badge badge-parking'>Garage/Parking</span><span class='badge badge-quiet'>Quiet evenings (proxy)</span></div>
+          
+          <div class='links'><a target='_blank' rel='noreferrer' href='https://makler.md/md/chisinau/real-estate/real-estate-for-sale/apartments-for-sale'><b>Ad</b></a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=47.055,28.889'>Maps</a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=47.055,28.889'>Street View</a></div>
+          <div class='summary'>
+            <div class="facts"><div class="factsLabel"><b>FACTS BOX (from the ad)</b></div>
+            <h3>Agent assessment — property (ad-anchored)</h3>
+<p><b>A) What the seller leans on:</b></p>
+<ul><li>No strong seller emphasis could be reliably extracted from the text.</li></ul>
+<p><b>B) Stated vs not stated (be strict):</b></p>
+<ul><li><b>Explicitly stated:</b></li><li>Key building/usage details are not clearly specified in the ad text.</li><li><b>Not stated:</b></li><li>Exact floor level / storey</li><li>Elevator / lift</li><li>Outdoor space (balcony/loggia/terrace/garden)</li><li>Parking / garage availability and terms</li><li>Energy certificate figures (HWB / fGEE)</li><li>Tenancy status (vacant vs rented, end date)</li><li>Furnishing included/excluded</li></ul>
+<p><b>C) Grounded read-between-the-lines:</b></p>
+<ul><li>If the pin is not confirmed, treat nearby-amenity context as approximate and verify the exact micro-location.</li></ul>
+<p><b>D) Viewing questions (bring these):</b></p>
+<ul><li>Which floor is it on, and is there a working elevator? (If yes: from which level?)</li><li>What exactly is included in the monthly costs (utilities, maintenance, building admin), and are there any planned increases?</li><li>Is the apartment vacant on handover, or is there an existing tenancy/occupant?</li><li>What is included in the sale (furniture/appliances), and what is excluded?</li><li>Are there upcoming building works (roof/facade/risers) and what is the reserve fund status (if applicable)?</li><li>If renovation/first-occupancy language is used: what scope is completed and what is still pending? Can you provide a written spec?</li><li>If parking is mentioned: is it included, optional, or just nearby? What are the terms and costs?</li></ul>
+<ul class="facts"><li><b>Price:</b> €114,900</li>
+<li><b>Size:</b> 51 m2</li>
+<li><b>Area:</b> Chișinău</li></ul></div>
+<h3>Micro-area (local guide)</h3>
+<p>No specific nearby landmarks or transit lines are named in the ad text. Rely on on-the-ground checks (evening noise, walk times) and the report’s generic OSM proxy signals rather than assumed venue proximity.</p>
+<p><b>Do an evening pass:</b> in Chișinău, bus/trolleybus frequency, park-adjacent gatherings, and arterial-road noise can change block-by-block. If possible, check 20:00–23:00 on a weekday and a weekend.</p>
+<h3>Macro-area (local guide)</h3>
+<p><i>General background (not source-verified):</i> Chișinău varies block-by-block. Focus on road noise, building condition, and practical walkability to errands.</p>
+<h3>Orientation</h3>
+<p>Centrality proxy is not available for this listing. Key orientation/access details are not specified (floor, lift).</p>
+            
+          </div>
+        </div>
+        
+        <div class='card' id='listing-5' data-rank='5' data-has-terrace='true' data-has-parking='true' data-lively='false' data-evening-score='0.0' tabindex='0' role='button' aria-label='Focus map on ranked listing 5'>
+          <div class='rank'>#5</div>
+          <div class='title'>
+            Apartament cu 3 approx. mere, Botanica, Chișinău, Chișinău mun. <span style='font-size:11px; color:#666; font-weight:400'> (Apartament cu 3 camere, Botanica, Chișinău, Chișinău mun.)</span>
+          </div>
+          <div class='meta'>75 m2 · 3 rooms </div>
+          <div class='badges'><span class='badge badge-terrace'>Terrace/Outdoor</span><span class='badge badge-parking'>Garage/Parking</span><span class='badge badge-quiet'>Quiet evenings (proxy)</span></div>
+          
+          <div class='links'><a target='_blank' rel='noreferrer' href='https://999.md/ro/103738242'><b>Ad</b></a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=46.9979,28.8576'>Maps</a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=46.9979,28.8576'>Street View</a></div>
+          <div class='summary'>
+            <div class="facts"><div class="factsLabel"><b>FACTS BOX (from the ad)</b></div>
+            <h3>Agent assessment — property (ad-anchored)</h3>
+<p><b>A) What the seller leans on:</b></p>
+<ul><li>No strong seller emphasis could be reliably extracted from the text.</li></ul>
+<p><b>B) Stated vs not stated (be strict):</b></p>
+<ul><li><b>Explicitly stated:</b></li><li>Key building/usage details are not clearly specified in the ad text.</li><li><b>Not stated:</b></li><li>Exact floor level / storey</li><li>Elevator / lift</li><li>Outdoor space (balcony/loggia/terrace/garden)</li><li>Parking / garage availability and terms</li><li>Energy certificate figures (HWB / fGEE)</li><li>Tenancy status (vacant vs rented, end date)</li><li>Furnishing included/excluded</li></ul>
+<p><b>C) Grounded read-between-the-lines:</b></p>
+<ul><li>If the pin is not confirmed, treat nearby-amenity context as approximate and verify the exact micro-location.</li></ul>
+<p><b>D) Viewing questions (bring these):</b></p>
+<ul><li>Which floor is it on, and is there a working elevator? (If yes: from which level?)</li><li>What exactly is included in the monthly costs (utilities, maintenance, building admin), and are there any planned increases?</li><li>Is the apartment vacant on handover, or is there an existing tenancy/occupant?</li><li>What is included in the sale (furniture/appliances), and what is excluded?</li><li>Are there upcoming building works (roof/facade/risers) and what is the reserve fund status (if applicable)?</li><li>If renovation/first-occupancy language is used: what scope is completed and what is still pending? Can you provide a written spec?</li><li>If parking is mentioned: is it included, optional, or just nearby? What are the terms and costs?</li></ul>
+<ul class="facts"><li><b>Size:</b> 75 m2</li>
+<li><b>Rooms:</b> 3</li>
+<li><b>Area:</b> Chișinău</li></ul></div>
+<h3>Micro-area (local guide)</h3>
+<p>No specific nearby landmarks or transit lines are named in the ad text. Rely on on-the-ground checks (evening noise, walk times) and the report’s generic OSM proxy signals rather than assumed venue proximity.</p>
+<p><b>Do an evening pass:</b> in Chișinău, bus/trolleybus frequency, park-adjacent gatherings, and arterial-road noise can change block-by-block. If possible, check 20:00–23:00 on a weekday and a weekend.</p>
+<h3>Macro-area (local guide)</h3>
+<p><i>General background (not source-verified):</i> Chișinău varies block-by-block. Focus on road noise, building condition, and practical walkability to errands.</p>
+<h3>Orientation</h3>
+<p>Centrality proxy is not available for this listing. Key orientation/access details are not specified (floor, lift).</p>
+            
+          </div>
+        </div>
+        
+        <div class='card' id='listing-6' data-rank='6' data-has-terrace='true' data-has-parking='true' data-lively='false' data-evening-score='0.0' tabindex='0' role='button' aria-label='Focus map on ranked listing 6'>
+          <div class='rank'>#6</div>
+          <div class='title'>
+            Apartament cu 1 approx. meră, Botanica, Chișinău, Chișinău mun. <span style='font-size:11px; color:#666; font-weight:400'> (Apartament cu 1 cameră, Botanica, Chișinău, Chișinău mun.)</span>
+          </div>
+          <div class='meta'>30 m2 </div>
+          <div class='badges'><span class='badge badge-terrace'>Terrace/Outdoor</span><span class='badge badge-parking'>Garage/Parking</span><span class='badge badge-quiet'>Quiet evenings (proxy)</span></div>
+          
+          <div class='links'><a target='_blank' rel='noreferrer' href='https://999.md/ro/103368292'><b>Ad</b></a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=46.9979,28.8576'>Maps</a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=46.9979,28.8576'>Street View</a></div>
+          <div class='summary'>
+            <div class="facts"><div class="factsLabel"><b>FACTS BOX (from the ad)</b></div>
+            <h3>Agent assessment — property (ad-anchored)</h3>
+<p><b>A) What the seller leans on:</b></p>
+<ul><li>parking: parcare.</li></ul>
+<p><b>B) Stated vs not stated (be strict):</b></p>
+<ul><li><b>Explicitly stated:</b></li><li>parking: parcare.</li><li><b>Not stated:</b></li><li>Exact floor level / storey</li><li>Elevator / lift</li><li>Outdoor space (balcony/loggia/terrace/garden)</li><li>Energy certificate figures (HWB / fGEE)</li><li>Tenancy status (vacant vs rented, end date)</li><li>Furnishing included/excluded</li></ul>
+<p><b>C) Grounded read-between-the-lines:</b></p>
+<ul><li>If the pin is not confirmed, treat nearby-amenity context as approximate and verify the exact micro-location.</li></ul>
+<p><b>D) Viewing questions (bring these):</b></p>
+<ul><li>Which floor is it on, and is there a working elevator? (If yes: from which level?)</li><li>What exactly is included in the monthly costs (utilities, maintenance, building admin), and are there any planned increases?</li><li>Is the apartment vacant on handover, or is there an existing tenancy/occupant?</li><li>What is included in the sale (furniture/appliances), and what is excluded?</li><li>Are there upcoming building works (roof/facade/risers) and what is the reserve fund status (if applicable)?</li><li>If renovation/first-occupancy language is used: what scope is completed and what is still pending? Can you provide a written spec?</li><li>If parking is mentioned: is it included, optional, or just nearby? What are the terms and costs?</li></ul>
+<ul class="facts"><li><b>Size:</b> 30 m2</li>
+<li><b>Area:</b> Chișinău</li></ul></div>
+<h3>Micro-area (local guide)</h3>
+<p>As stated in the ad, the location is framed around: Aeroport. Use these named anchors to sanity-check the exact micro-location (walks, crossings, slope, noise) and to test whether the daily-life gravity matches your needs.</p>
+<p><b>Do an evening pass:</b> in Chișinău, bus/trolleybus frequency, park-adjacent gatherings, and arterial-road noise can change block-by-block. If possible, check 20:00–23:00 on a weekday and a weekend.</p>
+<h3>Macro-area (local guide)</h3>
+<p><i>General background (not source-verified):</i> Chișinău varies block-by-block. Focus on road noise, building condition, and practical walkability to errands.</p>
+<h3>Orientation</h3>
+<p>Centrality proxy is not available for this listing. Key orientation/access details are not specified (floor, lift).</p>
+            
+          </div>
+        </div>
+        
+        <div class='card' id='listing-7' data-rank='7' data-has-terrace='true' data-has-parking='true' data-lively='false' data-evening-score='0.0' tabindex='0' role='button' aria-label='Focus map on ranked listing 7'>
+          <div class='rank'>#7</div>
+          <div class='title'>
+            Apartament cu 2 approx. mere, Botanica, Chișinău, Chișinău mun. <span style='font-size:11px; color:#666; font-weight:400'> (Apartament cu 2 camere, Botanica, Chișinău, Chișinău mun.)</span>
+          </div>
+          <div class='meta'>63 m2 · 2 rooms </div>
+          <div class='badges'><span class='badge badge-terrace'>Terrace/Outdoor</span><span class='badge badge-parking'>Garage/Parking</span><span class='badge badge-quiet'>Quiet evenings (proxy)</span></div>
+          
+          <div class='links'><a target='_blank' rel='noreferrer' href='https://999.md/ro/100725327'><b>Ad</b></a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=46.9979,28.8576'>Maps</a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=46.9979,28.8576'>Street View</a></div>
+          <div class='summary'>
+            <div class="facts"><div class="factsLabel"><b>FACTS BOX (from the ad)</b></div>
+            <h3>Agent assessment — property (ad-anchored)</h3>
+<p><b>A) What the seller leans on:</b></p>
+<ul><li>parking: Parcare deschisă;</li></ul>
+<p><b>B) Stated vs not stated (be strict):</b></p>
+<ul><li><b>Explicitly stated:</b></li><li>parking: Parcare deschisă;</li><li><b>Not stated:</b></li><li>Exact floor level / storey</li><li>Elevator / lift</li><li>Outdoor space (balcony/loggia/terrace/garden)</li><li>Energy certificate figures (HWB / fGEE)</li><li>Tenancy status (vacant vs rented, end date)</li><li>Furnishing included/excluded</li></ul>
+<p><b>C) Grounded read-between-the-lines:</b></p>
+<ul><li>If the pin is not confirmed, treat nearby-amenity context as approximate and verify the exact micro-location.</li></ul>
+<p><b>D) Viewing questions (bring these):</b></p>
+<ul><li>Which floor is it on, and is there a working elevator? (If yes: from which level?)</li><li>What exactly is included in the monthly costs (utilities, maintenance, building admin), and are there any planned increases?</li><li>Is the apartment vacant on handover, or is there an existing tenancy/occupant?</li><li>What is included in the sale (furniture/appliances), and what is excluded?</li><li>Are there upcoming building works (roof/facade/risers) and what is the reserve fund status (if applicable)?</li><li>If renovation/first-occupancy language is used: what scope is completed and what is still pending? Can you provide a written spec?</li><li>If parking is mentioned: is it included, optional, or just nearby? What are the terms and costs?</li></ul>
+<ul class="facts"><li><b>Size:</b> 63 m2</li>
+<li><b>Rooms:</b> 2</li>
+<li><b>Area:</b> Chișinău</li></ul></div>
+<h3>Micro-area (local guide)</h3>
+<p>No specific nearby landmarks or transit lines are named in the ad text. Rely on on-the-ground checks (evening noise, walk times) and the report’s generic OSM proxy signals rather than assumed venue proximity.</p>
+<p><b>Do an evening pass:</b> in Chișinău, bus/trolleybus frequency, park-adjacent gatherings, and arterial-road noise can change block-by-block. If possible, check 20:00–23:00 on a weekday and a weekend.</p>
+<h3>Macro-area (local guide)</h3>
+<p><i>General background (not source-verified):</i> Chișinău varies block-by-block. Focus on road noise, building condition, and practical walkability to errands.</p>
+<h3>Orientation</h3>
+<p>Centrality proxy is not available for this listing. Key orientation/access details are not specified (floor, lift).</p>
+            
+          </div>
+        </div>
+        
+        <div class='card' id='listing-8' data-rank='8' data-has-terrace='true' data-has-parking='true' data-lively='false' data-evening-score='0.0' tabindex='0' role='button' aria-label='Focus map on ranked listing 8'>
+          <div class='rank'>#8</div>
+          <div class='title'>
+            Apartament cu 2 approx. mere, Botanica, Chișinău, Chișinău mun. <span style='font-size:11px; color:#666; font-weight:400'> (Apartament cu 2 camere, Botanica, Chișinău, Chișinău mun.)</span>
+          </div>
+          <div class='meta'>55 m2 · 2 rooms </div>
+          <div class='badges'><span class='badge badge-terrace'>Terrace/Outdoor</span><span class='badge badge-parking'>Garage/Parking</span><span class='badge badge-quiet'>Quiet evenings (proxy)</span></div>
+          
+          <div class='links'><a target='_blank' rel='noreferrer' href='https://999.md/ro/101883370'><b>Ad</b></a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=46.9979,28.8576'>Maps</a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=46.9979,28.8576'>Street View</a></div>
+          <div class='summary'>
+            <div class="facts"><div class="factsLabel"><b>FACTS BOX (from the ad)</b></div>
+            <h3>Agent assessment — property (ad-anchored)</h3>
+<p><b>A) What the seller leans on:</b></p>
+<ul><li>No strong seller emphasis could be reliably extracted from the text.</li></ul>
+<p><b>B) Stated vs not stated (be strict):</b></p>
+<ul><li><b>Explicitly stated:</b></li><li>Key building/usage details are not clearly specified in the ad text.</li><li><b>Not stated:</b></li><li>Exact floor level / storey</li><li>Elevator / lift</li><li>Outdoor space (balcony/loggia/terrace/garden)</li><li>Parking / garage availability and terms</li><li>Energy certificate figures (HWB / fGEE)</li><li>Tenancy status (vacant vs rented, end date)</li><li>Furnishing included/excluded</li></ul>
+<p><b>C) Grounded read-between-the-lines:</b></p>
+<ul><li>If the pin is not confirmed, treat nearby-amenity context as approximate and verify the exact micro-location.</li></ul>
+<p><b>D) Viewing questions (bring these):</b></p>
+<ul><li>Which floor is it on, and is there a working elevator? (If yes: from which level?)</li><li>What exactly is included in the monthly costs (utilities, maintenance, building admin), and are there any planned increases?</li><li>Is the apartment vacant on handover, or is there an existing tenancy/occupant?</li><li>What is included in the sale (furniture/appliances), and what is excluded?</li><li>Are there upcoming building works (roof/facade/risers) and what is the reserve fund status (if applicable)?</li><li>If renovation/first-occupancy language is used: what scope is completed and what is still pending? Can you provide a written spec?</li><li>If parking is mentioned: is it included, optional, or just nearby? What are the terms and costs?</li></ul>
+<ul class="facts"><li><b>Size:</b> 55 m2</li>
+<li><b>Rooms:</b> 2</li>
+<li><b>Area:</b> Chișinău</li></ul></div>
+<h3>Micro-area (local guide)</h3>
+<p>No specific nearby landmarks or transit lines are named in the ad text. Rely on on-the-ground checks (evening noise, walk times) and the report’s generic OSM proxy signals rather than assumed venue proximity.</p>
+<p><b>Do an evening pass:</b> in Chișinău, bus/trolleybus frequency, park-adjacent gatherings, and arterial-road noise can change block-by-block. If possible, check 20:00–23:00 on a weekday and a weekend.</p>
+<h3>Macro-area (local guide)</h3>
+<p><i>General background (not source-verified):</i> Chișinău varies block-by-block. Focus on road noise, building condition, and practical walkability to errands.</p>
+<h3>Orientation</h3>
+<p>Centrality proxy is not available for this listing. Key orientation/access details are not specified (floor, lift).</p>
+            
+          </div>
+        </div>
+        
+        <div class='card' id='listing-9' data-rank='9' data-has-terrace='true' data-has-parking='true' data-lively='false' data-evening-score='0.0' tabindex='0' role='button' aria-label='Focus map on ranked listing 9'>
+          <div class='rank'>#9</div>
+          <div class='title'>
+            Apartament cu 2 approx. mere, Botanica 139000 € <span style='font-size:11px; color:#666; font-weight:400'> (Apartament cu 2 camere, Botanica 139000 €)</span>
+          </div>
+          <div class='meta'>€139,000 · 77 m2 </div>
+          <div class='badges'><span class='badge badge-terrace'>Terrace/Outdoor</span><span class='badge badge-parking'>Garage/Parking</span><span class='badge badge-quiet'>Quiet evenings (proxy)</span></div>
+          
+          <div class='links'><a target='_blank' rel='noreferrer' href='https://makler.md/real-estate/real-estate-for-sale/apartments-for-sale/an/1465084'><b>Ad</b></a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=46.9979,28.8576'>Maps</a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=46.9979,28.8576'>Street View</a></div>
+          <div class='summary'>
+            <div class="facts"><div class="factsLabel"><b>FACTS BOX (from the ad)</b></div>
+            <h3>Agent assessment — property (ad-anchored)</h3>
+<p><b>A) What the seller leans on:</b></p>
+<ul><li>No strong seller emphasis could be reliably extracted from the text.</li></ul>
+<p><b>B) Stated vs not stated (be strict):</b></p>
+<ul><li><b>Explicitly stated:</b></li><li>Key building/usage details are not clearly specified in the ad text.</li><li><b>Not stated:</b></li><li>Exact floor level / storey</li><li>Elevator / lift</li><li>Outdoor space (balcony/loggia/terrace/garden)</li><li>Parking / garage availability and terms</li><li>Energy certificate figures (HWB / fGEE)</li><li>Tenancy status (vacant vs rented, end date)</li><li>Furnishing included/excluded</li></ul>
+<p><b>C) Grounded read-between-the-lines:</b></p>
+<ul><li>If the pin is not confirmed, treat nearby-amenity context as approximate and verify the exact micro-location.</li></ul>
+<p><b>D) Viewing questions (bring these):</b></p>
+<ul><li>Which floor is it on, and is there a working elevator? (If yes: from which level?)</li><li>What exactly is included in the monthly costs (utilities, maintenance, building admin), and are there any planned increases?</li><li>Is the apartment vacant on handover, or is there an existing tenancy/occupant?</li><li>What is included in the sale (furniture/appliances), and what is excluded?</li><li>Are there upcoming building works (roof/facade/risers) and what is the reserve fund status (if applicable)?</li><li>If renovation/first-occupancy language is used: what scope is completed and what is still pending? Can you provide a written spec?</li><li>If parking is mentioned: is it included, optional, or just nearby? What are the terms and costs?</li></ul>
+<ul class="facts"><li><b>Price:</b> €139,000</li>
+<li><b>Size:</b> 77 m2</li>
+<li><b>Area:</b> Chișinău</li></ul></div>
+<h3>Micro-area (local guide)</h3>
+<p>No specific nearby landmarks or transit lines are named in the ad text. Rely on on-the-ground checks (evening noise, walk times) and the report’s generic OSM proxy signals rather than assumed venue proximity.</p>
+<p><b>Do an evening pass:</b> in Chișinău, bus/trolleybus frequency, park-adjacent gatherings, and arterial-road noise can change block-by-block. If possible, check 20:00–23:00 on a weekday and a weekend.</p>
+<h3>Macro-area (local guide)</h3>
+<p><i>General background (not source-verified):</i> Chișinău varies block-by-block. Focus on road noise, building condition, and practical walkability to errands.</p>
+<h3>Orientation</h3>
+<p>Centrality proxy is not available for this listing. Key orientation/access details are not specified (floor, lift).</p>
+            
+          </div>
+        </div>
+        
+        <div class='card' id='listing-10' data-rank='10' data-has-terrace='true' data-has-parking='true' data-lively='false' data-evening-score='0.0' tabindex='0' role='button' aria-label='Focus map on ranked listing 10'>
+          <div class='rank'>#10</div>
+          <div class='title'>
+            Vânzare apartamente, approx. mere din Chişinău <span style='font-size:11px; color:#666; font-weight:400'> (Vânzare apartamente, camere din Chişinău)</span>
+          </div>
+          <div class='meta'>€114,900 · 51 m2 </div>
+          <div class='badges'><span class='badge badge-terrace'>Terrace/Outdoor</span><span class='badge badge-parking'>Garage/Parking</span><span class='badge badge-quiet'>Quiet evenings (proxy)</span></div>
+          
+          <div class='links'><a target='_blank' rel='noreferrer' href='https://makler.md/md/chisinau/real-estate/real-estate-for-sale/apartments-for-sale?list&amp;currency_id=5&amp;list=detail'><b>Ad</b></a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=46.9979,28.8576'>Maps</a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=46.9979,28.8576'>Street View</a></div>
+          <div class='summary'>
+            <div class="facts"><div class="factsLabel"><b>FACTS BOX (from the ad)</b></div>
+            <h3>Agent assessment — property (ad-anchored)</h3>
+<p><b>A) What the seller leans on:</b></p>
+<ul><li>No strong seller emphasis could be reliably extracted from the text.</li></ul>
+<p><b>B) Stated vs not stated (be strict):</b></p>
+<ul><li><b>Explicitly stated:</b></li><li>Key building/usage details are not clearly specified in the ad text.</li><li><b>Not stated:</b></li><li>Exact floor level / storey</li><li>Elevator / lift</li><li>Outdoor space (balcony/loggia/terrace/garden)</li><li>Parking / garage availability and terms</li><li>Energy certificate figures (HWB / fGEE)</li><li>Tenancy status (vacant vs rented, end date)</li><li>Furnishing included/excluded</li></ul>
+<p><b>C) Grounded read-between-the-lines:</b></p>
+<ul><li>If the pin is not confirmed, treat nearby-amenity context as approximate and verify the exact micro-location.</li></ul>
+<p><b>D) Viewing questions (bring these):</b></p>
+<ul><li>Which floor is it on, and is there a working elevator? (If yes: from which level?)</li><li>What exactly is included in the monthly costs (utilities, maintenance, building admin), and are there any planned increases?</li><li>Is the apartment vacant on handover, or is there an existing tenancy/occupant?</li><li>What is included in the sale (furniture/appliances), and what is excluded?</li><li>Are there upcoming building works (roof/facade/risers) and what is the reserve fund status (if applicable)?</li><li>If renovation/first-occupancy language is used: what scope is completed and what is still pending? Can you provide a written spec?</li><li>If parking is mentioned: is it included, optional, or just nearby? What are the terms and costs?</li></ul>
+<ul class="facts"><li><b>Price:</b> €114,900</li>
+<li><b>Size:</b> 51 m2</li>
+<li><b>Area:</b> Chișinău</li></ul></div>
+<h3>Micro-area (local guide)</h3>
+<p>No specific nearby landmarks or transit lines are named in the ad text. Rely on on-the-ground checks (evening noise, walk times) and the report’s generic OSM proxy signals rather than assumed venue proximity.</p>
+<p><b>Do an evening pass:</b> in Chișinău, bus/trolleybus frequency, park-adjacent gatherings, and arterial-road noise can change block-by-block. If possible, check 20:00–23:00 on a weekday and a weekend.</p>
+<h3>Macro-area (local guide)</h3>
+<p><i>General background (not source-verified):</i> Chișinău varies block-by-block. Focus on road noise, building condition, and practical walkability to errands.</p>
+<h3>Orientation</h3>
+<p>Centrality proxy is not available for this listing. Key orientation/access details are not specified (floor, lift).</p>
+            
+          </div>
+        </div>
+        
+        <div class='card' id='listing-11' data-rank='11' data-has-terrace='true' data-has-parking='true' data-lively='false' data-evening-score='0.0' tabindex='0' role='button' aria-label='Focus map on ranked listing 11'>
+          <div class='rank'>#11</div>
+          <div class='title'>
+            Chișinău, Botanica Dimineții Vă propunem spre vânzare apartament în 75500 € <span style='font-size:11px; color:#666; font-weight:400'> (Chișinău, Botanica Dimineții Vă propunem spre vânzare apartament în 75500 €)</span>
+          </div>
+          <div class='meta'>€75,500 · 37 m2 </div>
+          <div class='badges'><span class='badge badge-terrace'>Terrace/Outdoor</span><span class='badge badge-parking'>Garage/Parking</span><span class='badge badge-quiet'>Quiet evenings (proxy)</span></div>
+          
+          <div class='links'><a target='_blank' rel='noreferrer' href='https://makler.md/real-estate/real-estate-for-sale/apartments-for-sale/an/1418103'><b>Ad</b></a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=46.9979,28.8576'>Maps</a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=46.9979,28.8576'>Street View</a></div>
+          <div class='summary'>
+            <div class="facts"><div class="factsLabel"><b>FACTS BOX (from the ad)</b></div>
+            <h3>Agent assessment — property (ad-anchored)</h3>
+<p><b>A) What the seller leans on:</b></p>
+<ul><li>No strong seller emphasis could be reliably extracted from the text.</li></ul>
+<p><b>B) Stated vs not stated (be strict):</b></p>
+<ul><li><b>Explicitly stated:</b></li><li>Key building/usage details are not clearly specified in the ad text.</li><li><b>Not stated:</b></li><li>Exact floor level / storey</li><li>Elevator / lift</li><li>Outdoor space (balcony/loggia/terrace/garden)</li><li>Parking / garage availability and terms</li><li>Energy certificate figures (HWB / fGEE)</li><li>Tenancy status (vacant vs rented, end date)</li><li>Furnishing included/excluded</li></ul>
+<p><b>C) Grounded read-between-the-lines:</b></p>
+<ul><li>If the pin is not confirmed, treat nearby-amenity context as approximate and verify the exact micro-location.</li></ul>
+<p><b>D) Viewing questions (bring these):</b></p>
+<ul><li>Which floor is it on, and is there a working elevator? (If yes: from which level?)</li><li>What exactly is included in the monthly costs (utilities, maintenance, building admin), and are there any planned increases?</li><li>Is the apartment vacant on handover, or is there an existing tenancy/occupant?</li><li>What is included in the sale (furniture/appliances), and what is excluded?</li><li>Are there upcoming building works (roof/facade/risers) and what is the reserve fund status (if applicable)?</li><li>If renovation/first-occupancy language is used: what scope is completed and what is still pending? Can you provide a written spec?</li><li>If parking is mentioned: is it included, optional, or just nearby? What are the terms and costs?</li></ul>
+<ul class="facts"><li><b>Price:</b> €75,500</li>
+<li><b>Size:</b> 37 m2</li>
+<li><b>Area:</b> Chișinău</li></ul></div>
+<h3>Micro-area (local guide)</h3>
+<p>No specific nearby landmarks or transit lines are named in the ad text. Rely on on-the-ground checks (evening noise, walk times) and the report’s generic OSM proxy signals rather than assumed venue proximity.</p>
+<p><b>Do an evening pass:</b> in Chișinău, bus/trolleybus frequency, park-adjacent gatherings, and arterial-road noise can change block-by-block. If possible, check 20:00–23:00 on a weekday and a weekend.</p>
+<h3>Macro-area (local guide)</h3>
+<p><i>General background (not source-verified):</i> Chișinău varies block-by-block. Focus on road noise, building condition, and practical walkability to errands.</p>
+<h3>Orientation</h3>
+<p>Centrality proxy is not available for this listing. Key orientation/access details are not specified (floor, lift).</p>
+            
+          </div>
+        </div>
+        
+        <div class='card' id='listing-12' data-rank='12' data-has-terrace='true' data-has-parking='true' data-lively='false' data-evening-score='0.0' tabindex='0' role='button' aria-label='Focus map on ranked listing 12'>
+          <div class='rank'>#12</div>
+          <div class='title'>
+            Vă propunem spre vânzare acestapartament cu 1 approx. meră, sect. Botanica, 60000 € <span style='font-size:11px; color:#666; font-weight:400'> (Vă propunem spre vânzare acestapartament cu 1 cameră, sect. Botanica, 60000 €)</span>
+          </div>
+          <div class='meta'>€60,000 </div>
+          <div class='badges'><span class='badge badge-terrace'>Terrace/Outdoor</span><span class='badge badge-parking'>Garage/Parking</span><span class='badge badge-quiet'>Quiet evenings (proxy)</span></div>
+          
+          <div class='links'><a target='_blank' rel='noreferrer' href='https://makler.md/real-estate/real-estate-for-sale/apartments-for-sale/an/1426821'><b>Ad</b></a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=46.9979,28.8576'>Maps</a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=46.9979,28.8576'>Street View</a></div>
+          <div class='summary'>
+            <div class="facts"><div class="factsLabel"><b>FACTS BOX (from the ad)</b></div>
+            <h3>Agent assessment — property (ad-anchored)</h3>
+<p><b>A) What the seller leans on:</b></p>
+<ul><li>No strong seller emphasis could be reliably extracted from the text.</li></ul>
+<p><b>B) Stated vs not stated (be strict):</b></p>
+<ul><li><b>Explicitly stated:</b></li><li>Key building/usage details are not clearly specified in the ad text.</li><li><b>Not stated:</b></li><li>Exact floor level / storey</li><li>Elevator / lift</li><li>Outdoor space (balcony/loggia/terrace/garden)</li><li>Parking / garage availability and terms</li><li>Energy certificate figures (HWB / fGEE)</li><li>Tenancy status (vacant vs rented, end date)</li><li>Furnishing included/excluded</li></ul>
+<p><b>C) Grounded read-between-the-lines:</b></p>
+<ul><li>If the pin is not confirmed, treat nearby-amenity context as approximate and verify the exact micro-location.</li></ul>
+<p><b>D) Viewing questions (bring these):</b></p>
+<ul><li>Which floor is it on, and is there a working elevator? (If yes: from which level?)</li><li>What exactly is included in the monthly costs (utilities, maintenance, building admin), and are there any planned increases?</li><li>Is the apartment vacant on handover, or is there an existing tenancy/occupant?</li><li>What is included in the sale (furniture/appliances), and what is excluded?</li><li>Are there upcoming building works (roof/facade/risers) and what is the reserve fund status (if applicable)?</li><li>If renovation/first-occupancy language is used: what scope is completed and what is still pending? Can you provide a written spec?</li><li>If parking is mentioned: is it included, optional, or just nearby? What are the terms and costs?</li></ul>
+<ul class="facts"><li><b>Price:</b> €60,000</li>
+<li><b>Area:</b> Chișinău</li></ul></div>
+<h3>Micro-area (local guide)</h3>
+<p>No specific nearby landmarks or transit lines are named in the ad text. Rely on on-the-ground checks (evening noise, walk times) and the report’s generic OSM proxy signals rather than assumed venue proximity.</p>
+<p><b>Do an evening pass:</b> in Chișinău, bus/trolleybus frequency, park-adjacent gatherings, and arterial-road noise can change block-by-block. If possible, check 20:00–23:00 on a weekday and a weekend.</p>
+<h3>Macro-area (local guide)</h3>
+<p><i>General background (not source-verified):</i> Chișinău varies block-by-block. Focus on road noise, building condition, and practical walkability to errands.</p>
+<h3>Orientation</h3>
+<p>Centrality proxy is not available for this listing. Key orientation/access details are not specified (floor, lift).</p>
+            
+          </div>
+        </div>
+        
+        <div class='card' id='listing-13' data-rank='13' data-has-terrace='true' data-has-parking='true' data-lively='false' data-evening-score='0.0' tabindex='0' role='button' aria-label='Focus map on ranked listing 13'>
+          <div class='rank'>#13</div>
+          <div class='title'>
+            Chișinău, Botanica Cetatea Alba Vă propunem spre vânzare acest 63500 € <span style='font-size:11px; color:#666; font-weight:400'> (Chișinău, Botanica Cetatea Alba Vă propunem spre vânzare acest 63500 €)</span>
+          </div>
+          <div class='meta'>€63,500 · 43 m2 </div>
+          <div class='badges'><span class='badge badge-terrace'>Terrace/Outdoor</span><span class='badge badge-parking'>Garage/Parking</span><span class='badge badge-quiet'>Quiet evenings (proxy)</span></div>
+          
+          <div class='links'><a target='_blank' rel='noreferrer' href='https://makler.md/real-estate/real-estate-for-sale/apartments-for-sale/an/1415090'><b>Ad</b></a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=46.9979,28.8576'>Maps</a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=46.9979,28.8576'>Street View</a></div>
+          <div class='summary'>
+            <div class="facts"><div class="factsLabel"><b>FACTS BOX (from the ad)</b></div>
+            <h3>Agent assessment — property (ad-anchored)</h3>
+<p><b>A) What the seller leans on:</b></p>
+<ul><li>No strong seller emphasis could be reliably extracted from the text.</li></ul>
+<p><b>B) Stated vs not stated (be strict):</b></p>
+<ul><li><b>Explicitly stated:</b></li><li>Key building/usage details are not clearly specified in the ad text.</li><li><b>Not stated:</b></li><li>Exact floor level / storey</li><li>Elevator / lift</li><li>Outdoor space (balcony/loggia/terrace/garden)</li><li>Parking / garage availability and terms</li><li>Energy certificate figures (HWB / fGEE)</li><li>Tenancy status (vacant vs rented, end date)</li><li>Furnishing included/excluded</li></ul>
+<p><b>C) Grounded read-between-the-lines:</b></p>
+<ul><li>If the pin is not confirmed, treat nearby-amenity context as approximate and verify the exact micro-location.</li></ul>
+<p><b>D) Viewing questions (bring these):</b></p>
+<ul><li>Which floor is it on, and is there a working elevator? (If yes: from which level?)</li><li>What exactly is included in the monthly costs (utilities, maintenance, building admin), and are there any planned increases?</li><li>Is the apartment vacant on handover, or is there an existing tenancy/occupant?</li><li>What is included in the sale (furniture/appliances), and what is excluded?</li><li>Are there upcoming building works (roof/facade/risers) and what is the reserve fund status (if applicable)?</li><li>If renovation/first-occupancy language is used: what scope is completed and what is still pending? Can you provide a written spec?</li><li>If parking is mentioned: is it included, optional, or just nearby? What are the terms and costs?</li></ul>
+<ul class="facts"><li><b>Price:</b> €63,500</li>
+<li><b>Size:</b> 43 m2</li>
+<li><b>Area:</b> Chișinău</li></ul></div>
+<h3>Micro-area (local guide)</h3>
+<p>No specific nearby landmarks or transit lines are named in the ad text. Rely on on-the-ground checks (evening noise, walk times) and the report’s generic OSM proxy signals rather than assumed venue proximity.</p>
+<p><b>Do an evening pass:</b> in Chișinău, bus/trolleybus frequency, park-adjacent gatherings, and arterial-road noise can change block-by-block. If possible, check 20:00–23:00 on a weekday and a weekend.</p>
+<h3>Macro-area (local guide)</h3>
+<p><i>General background (not source-verified):</i> Chișinău varies block-by-block. Focus on road noise, building condition, and practical walkability to errands.</p>
+<h3>Orientation</h3>
+<p>Centrality proxy is not available for this listing. Key orientation/access details are not specified (floor, lift).</p>
+            
+          </div>
+        </div>
+        
+        <div class='card' id='listing-14' data-rank='14' data-has-terrace='true' data-has-parking='true' data-lively='false' data-evening-score='0.0' tabindex='0' role='button' aria-label='Focus map on ranked listing 14'>
+          <div class='rank'>#14</div>
+          <div class='title'>
+            Apartament cu 1 approx. meră, Râșcani, Chișinău, Chișinău mun. <span style='font-size:11px; color:#666; font-weight:400'> (Apartament cu 1 cameră, Râșcani, Chișinău, Chișinău mun.)</span>
+          </div>
+          <div class='meta'>€95,000 · 43 m2 </div>
+          <div class='badges'><span class='badge badge-terrace'>Terrace/Outdoor</span><span class='badge badge-parking'>Garage/Parking</span><span class='badge badge-quiet'>Quiet evenings (proxy)</span></div>
+          
+          <div class='links'><a target='_blank' rel='noreferrer' href='https://999.md/ro/103770436'><b>Ad</b></a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=47.0449,28.836'>Maps</a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=47.0449,28.836'>Street View</a></div>
+          <div class='summary'>
+            <div class="facts"><div class="factsLabel"><b>FACTS BOX (from the ad)</b></div>
+            <h3>Agent assessment — property (ad-anchored)</h3>
+<p><b>A) What the seller leans on:</b></p>
+<ul><li>No strong seller emphasis could be reliably extracted from the text.</li></ul>
+<p><b>B) Stated vs not stated (be strict):</b></p>
+<ul><li><b>Explicitly stated:</b></li><li>Key building/usage details are not clearly specified in the ad text.</li><li><b>Not stated:</b></li><li>Exact floor level / storey</li><li>Elevator / lift</li><li>Outdoor space (balcony/loggia/terrace/garden)</li><li>Parking / garage availability and terms</li><li>Energy certificate figures (HWB / fGEE)</li><li>Tenancy status (vacant vs rented, end date)</li><li>Furnishing included/excluded</li></ul>
+<p><b>C) Grounded read-between-the-lines:</b></p>
+<ul><li>If the pin is not confirmed, treat nearby-amenity context as approximate and verify the exact micro-location.</li></ul>
+<p><b>D) Viewing questions (bring these):</b></p>
+<ul><li>Which floor is it on, and is there a working elevator? (If yes: from which level?)</li><li>What exactly is included in the monthly costs (utilities, maintenance, building admin), and are there any planned increases?</li><li>Is the apartment vacant on handover, or is there an existing tenancy/occupant?</li><li>What is included in the sale (furniture/appliances), and what is excluded?</li><li>Are there upcoming building works (roof/facade/risers) and what is the reserve fund status (if applicable)?</li><li>If renovation/first-occupancy language is used: what scope is completed and what is still pending? Can you provide a written spec?</li><li>If parking is mentioned: is it included, optional, or just nearby? What are the terms and costs?</li></ul>
+<ul class="facts"><li><b>Price:</b> €95,000</li>
+<li><b>Size:</b> 43 m2</li>
+<li><b>Area:</b> Chișinău</li></ul></div>
+<h3>Micro-area (local guide)</h3>
+<p>No specific nearby landmarks or transit lines are named in the ad text. Rely on on-the-ground checks (evening noise, walk times) and the report’s generic OSM proxy signals rather than assumed venue proximity.</p>
+<p><b>Do an evening pass:</b> in Chișinău, bus/trolleybus frequency, park-adjacent gatherings, and arterial-road noise can change block-by-block. If possible, check 20:00–23:00 on a weekday and a weekend.</p>
+<h3>Macro-area (local guide)</h3>
+<p><i>General background (not source-verified):</i> Chișinău varies block-by-block. Focus on road noise, building condition, and practical walkability to errands.</p>
+<h3>Orientation</h3>
+<p>Centrality proxy is not available for this listing. Key orientation/access details are not specified (floor, lift).</p>
+            
+          </div>
+        </div>
+        
+        <div class='card' id='listing-15' data-rank='15' data-has-terrace='true' data-has-parking='true' data-lively='false' data-evening-score='0.0' tabindex='0' role='button' aria-label='Focus map on ranked listing 15'>
+          <div class='rank'>#15</div>
+          <div class='title'>
+            Apartament cu 2 approx. mere, Râșcani, Chișinău, Chișinău mun. <span style='font-size:11px; color:#666; font-weight:400'> (Apartament cu 2 camere, Râșcani, Chișinău, Chișinău mun.)</span>
+          </div>
+          <div class='meta'>70 m2 · 2 rooms </div>
+          <div class='badges'><span class='badge badge-terrace'>Terrace/Outdoor</span><span class='badge badge-parking'>Garage/Parking</span><span class='badge badge-quiet'>Quiet evenings (proxy)</span></div>
+          
+          <div class='links'><a target='_blank' rel='noreferrer' href='https://999.md/ro/103747498'><b>Ad</b></a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=47.0449,28.836'>Maps</a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=47.0449,28.836'>Street View</a></div>
+          <div class='summary'>
+            <div class="facts"><div class="factsLabel"><b>FACTS BOX (from the ad)</b></div>
+            <h3>Agent assessment — property (ad-anchored)</h3>
+<p><b>A) What the seller leans on:</b></p>
+<ul><li>parking: parcare.</li></ul>
+<p><b>B) Stated vs not stated (be strict):</b></p>
+<ul><li><b>Explicitly stated:</b></li><li>parking: parcare.</li><li><b>Not stated:</b></li><li>Exact floor level / storey</li><li>Elevator / lift</li><li>Outdoor space (balcony/loggia/terrace/garden)</li><li>Energy certificate figures (HWB / fGEE)</li><li>Tenancy status (vacant vs rented, end date)</li><li>Furnishing included/excluded</li></ul>
+<p><b>C) Grounded read-between-the-lines:</b></p>
+<ul><li>If the pin is not confirmed, treat nearby-amenity context as approximate and verify the exact micro-location.</li></ul>
+<p><b>D) Viewing questions (bring these):</b></p>
+<ul><li>Which floor is it on, and is there a working elevator? (If yes: from which level?)</li><li>What exactly is included in the monthly costs (utilities, maintenance, building admin), and are there any planned increases?</li><li>Is the apartment vacant on handover, or is there an existing tenancy/occupant?</li><li>What is included in the sale (furniture/appliances), and what is excluded?</li><li>Are there upcoming building works (roof/facade/risers) and what is the reserve fund status (if applicable)?</li><li>If renovation/first-occupancy language is used: what scope is completed and what is still pending? Can you provide a written spec?</li><li>If parking is mentioned: is it included, optional, or just nearby? What are the terms and costs?</li></ul>
+<ul class="facts"><li><b>Size:</b> 70 m2</li>
+<li><b>Rooms:</b> 2</li>
+<li><b>Area:</b> Chișinău</li></ul></div>
+<h3>Micro-area (local guide)</h3>
+<p>No specific nearby landmarks or transit lines are named in the ad text. Rely on on-the-ground checks (evening noise, walk times) and the report’s generic OSM proxy signals rather than assumed venue proximity.</p>
+<p><b>Do an evening pass:</b> in Chișinău, bus/trolleybus frequency, park-adjacent gatherings, and arterial-road noise can change block-by-block. If possible, check 20:00–23:00 on a weekday and a weekend.</p>
+<h3>Macro-area (local guide)</h3>
+<p><i>General background (not source-verified):</i> Chișinău varies block-by-block. Focus on road noise, building condition, and practical walkability to errands.</p>
+<h3>Orientation</h3>
+<p>Centrality proxy is not available for this listing. Key orientation/access details are not specified (floor, lift).</p>
+            
+          </div>
+        </div>
+        
+        <div class='card' id='listing-16' data-rank='16' data-has-terrace='true' data-has-parking='true' data-lively='false' data-evening-score='0.0' tabindex='0' role='button' aria-label='Focus map on ranked listing 16'>
+          <div class='rank'>#16</div>
+          <div class='title'>
+            Apartament cu 3 approx. mere, Râșcani, Chișinău, Chișinău mun. <span style='font-size:11px; color:#666; font-weight:400'> (Apartament cu 3 camere, Râșcani, Chișinău, Chișinău mun.)</span>
+          </div>
+          <div class='meta'>100 m2 · 3 rooms </div>
+          <div class='badges'><span class='badge badge-terrace'>Terrace/Outdoor</span><span class='badge badge-parking'>Garage/Parking</span><span class='badge badge-quiet'>Quiet evenings (proxy)</span></div>
+          
+          <div class='links'><a target='_blank' rel='noreferrer' href='https://999.md/ro/102240633'><b>Ad</b></a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=47.0449,28.836'>Maps</a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=47.0449,28.836'>Street View</a></div>
+          <div class='summary'>
+            <div class="facts"><div class="factsLabel"><b>FACTS BOX (from the ad)</b></div>
+            <h3>Agent assessment — property (ad-anchored)</h3>
+<p><b>A) What the seller leans on:</b></p>
+<ul><li>parking: parcare în curtea complexului sau în subteran.</li></ul>
+<p><b>B) Stated vs not stated (be strict):</b></p>
+<ul><li><b>Explicitly stated:</b></li><li>parking: parcare în curtea complexului sau în subteran.</li><li><b>Not stated:</b></li><li>Exact floor level / storey</li><li>Elevator / lift</li><li>Outdoor space (balcony/loggia/terrace/garden)</li><li>Energy certificate figures (HWB / fGEE)</li><li>Tenancy status (vacant vs rented, end date)</li><li>Furnishing included/excluded</li></ul>
+<p><b>C) Grounded read-between-the-lines:</b></p>
+<ul><li>If the pin is not confirmed, treat nearby-amenity context as approximate and verify the exact micro-location.</li></ul>
+<p><b>D) Viewing questions (bring these):</b></p>
+<ul><li>Which floor is it on, and is there a working elevator? (If yes: from which level?)</li><li>What exactly is included in the monthly costs (utilities, maintenance, building admin), and are there any planned increases?</li><li>Is the apartment vacant on handover, or is there an existing tenancy/occupant?</li><li>What is included in the sale (furniture/appliances), and what is excluded?</li><li>Are there upcoming building works (roof/facade/risers) and what is the reserve fund status (if applicable)?</li><li>If renovation/first-occupancy language is used: what scope is completed and what is still pending? Can you provide a written spec?</li><li>If parking is mentioned: is it included, optional, or just nearby? What are the terms and costs?</li></ul>
+<ul class="facts"><li><b>Size:</b> 100 m2</li>
+<li><b>Rooms:</b> 3</li>
+<li><b>Area:</b> Chișinău</li></ul></div>
+<h3>Micro-area (local guide)</h3>
+<p>No specific nearby landmarks or transit lines are named in the ad text. Rely on on-the-ground checks (evening noise, walk times) and the report’s generic OSM proxy signals rather than assumed venue proximity.</p>
+<p><b>Do an evening pass:</b> in Chișinău, bus/trolleybus frequency, park-adjacent gatherings, and arterial-road noise can change block-by-block. If possible, check 20:00–23:00 on a weekday and a weekend.</p>
+<h3>Macro-area (local guide)</h3>
+<p><i>General background (not source-verified):</i> Chișinău varies block-by-block. Focus on road noise, building condition, and practical walkability to errands.</p>
+<h3>Orientation</h3>
+<p>Centrality proxy is not available for this listing. Key orientation/access details are not specified (floor, lift).</p>
+            
+          </div>
+        </div>
+        
+        <div class='card' id='listing-17' data-rank='17' data-has-terrace='true' data-has-parking='true' data-lively='false' data-evening-score='0.0' tabindex='0' role='button' aria-label='Focus map on ranked listing 17'>
+          <div class='rank'>#17</div>
+          <div class='title'>
+            Imobiliare Moldova, anunțuri de cumpărare și vânzare de bunuri imobiliare în Chisinau, PMR si Moldova - 999.md <span style='font-size:11px; color:#666; font-weight:400'> (Imobiliare Moldova, anunțuri de cumpărare și vânzare de bunuri imobiliare în Chisinau, PMR si Moldova | 999.md)</span>
+          </div>
+          <div class='meta'> </div>
+          <div class='badges'><span class='badge badge-terrace'>Terrace/Outdoor</span><span class='badge badge-parking'>Garage/Parking</span><span class='badge badge-quiet'>Quiet evenings (proxy)</span></div>
+          
+          <div class='links'><a target='_blank' rel='noreferrer' href='https://999.md/ro/category/real-estate'><b>Ad</b></a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=47.0449,28.836'>Maps</a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=47.0449,28.836'>Street View</a></div>
+          <div class='summary'>
+            <div class="facts"><div class="factsLabel"><b>FACTS BOX (from the ad)</b></div>
+            <h3>Agent assessment — property (ad-anchored)</h3>
+<p><b>A) What the seller leans on:</b></p>
+<ul><li>No strong seller emphasis could be reliably extracted from the text.</li></ul>
+<p><b>B) Stated vs not stated (be strict):</b></p>
+<ul><li><b>Explicitly stated:</b></li><li>Key building/usage details are not clearly specified in the ad text.</li><li><b>Not stated:</b></li><li>Exact floor level / storey</li><li>Elevator / lift</li><li>Outdoor space (balcony/loggia/terrace/garden)</li><li>Parking / garage availability and terms</li><li>Energy certificate figures (HWB / fGEE)</li><li>Tenancy status (vacant vs rented, end date)</li><li>Furnishing included/excluded</li></ul>
+<p><b>C) Grounded read-between-the-lines:</b></p>
+<ul><li>If the pin is not confirmed, treat nearby-amenity context as approximate and verify the exact micro-location.</li></ul>
+<p><b>D) Viewing questions (bring these):</b></p>
+<ul><li>Which floor is it on, and is there a working elevator? (If yes: from which level?)</li><li>What exactly is included in the monthly costs (utilities, maintenance, building admin), and are there any planned increases?</li><li>Is the apartment vacant on handover, or is there an existing tenancy/occupant?</li><li>What is included in the sale (furniture/appliances), and what is excluded?</li><li>Are there upcoming building works (roof/facade/risers) and what is the reserve fund status (if applicable)?</li><li>If renovation/first-occupancy language is used: what scope is completed and what is still pending? Can you provide a written spec?</li><li>If parking is mentioned: is it included, optional, or just nearby? What are the terms and costs?</li></ul>
+<ul class="facts"><li><b>Area:</b> Chișinău</li></ul></div>
+<h3>Micro-area (local guide)</h3>
+<p>No specific nearby landmarks or transit lines are named in the ad text. Rely on on-the-ground checks (evening noise, walk times) and the report’s generic OSM proxy signals rather than assumed venue proximity.</p>
+<p><b>Do an evening pass:</b> in Chișinău, bus/trolleybus frequency, park-adjacent gatherings, and arterial-road noise can change block-by-block. If possible, check 20:00–23:00 on a weekday and a weekend.</p>
+<h3>Macro-area (local guide)</h3>
+<p><i>General background (not source-verified):</i> Chișinău varies block-by-block. Focus on road noise, building condition, and practical walkability to errands.</p>
+<h3>Orientation</h3>
+<p>Centrality proxy is not available for this listing. Key orientation/access details are not specified (floor, lift).</p>
+            
+          </div>
+        </div>
+        
+        <div class='card' id='listing-18' data-rank='18' data-has-terrace='true' data-has-parking='true' data-lively='false' data-evening-score='0.0' tabindex='0' role='button' aria-label='Focus map on ranked listing 18'>
+          <div class='rank'>#18</div>
+          <div class='title'>
+            Apartament cu 2 approx. mere, Râșcani, Chișinău, Chișinău mun. <span style='font-size:11px; color:#666; font-weight:400'> (Apartament cu 2 camere, Râșcani, Chișinău, Chișinău mun.)</span>
+          </div>
+          <div class='meta'>58 m2 · 2 rooms </div>
+          <div class='badges'><span class='badge badge-terrace'>Terrace/Outdoor</span><span class='badge badge-parking'>Garage/Parking</span><span class='badge badge-quiet'>Quiet evenings (proxy)</span></div>
+          
+          <div class='links'><a target='_blank' rel='noreferrer' href='https://999.md/ro/102961127'><b>Ad</b></a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=47.0449,28.836'>Maps</a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=47.0449,28.836'>Street View</a></div>
+          <div class='summary'>
+            <div class="facts"><div class="factsLabel"><b>FACTS BOX (from the ad)</b></div>
+            <h3>Agent assessment — property (ad-anchored)</h3>
+<p><b>A) What the seller leans on:</b></p>
+<ul><li>parking: parcare;</li></ul>
+<p><b>B) Stated vs not stated (be strict):</b></p>
+<ul><li><b>Explicitly stated:</b></li><li>parking: parcare;</li><li><b>Not stated:</b></li><li>Exact floor level / storey</li><li>Elevator / lift</li><li>Outdoor space (balcony/loggia/terrace/garden)</li><li>Energy certificate figures (HWB / fGEE)</li><li>Tenancy status (vacant vs rented, end date)</li><li>Furnishing included/excluded</li></ul>
+<p><b>C) Grounded read-between-the-lines:</b></p>
+<ul><li>If the pin is not confirmed, treat nearby-amenity context as approximate and verify the exact micro-location.</li></ul>
+<p><b>D) Viewing questions (bring these):</b></p>
+<ul><li>Which floor is it on, and is there a working elevator? (If yes: from which level?)</li><li>What exactly is included in the monthly costs (utilities, maintenance, building admin), and are there any planned increases?</li><li>Is the apartment vacant on handover, or is there an existing tenancy/occupant?</li><li>What is included in the sale (furniture/appliances), and what is excluded?</li><li>Are there upcoming building works (roof/facade/risers) and what is the reserve fund status (if applicable)?</li><li>If renovation/first-occupancy language is used: what scope is completed and what is still pending? Can you provide a written spec?</li><li>If parking is mentioned: is it included, optional, or just nearby? What are the terms and costs?</li></ul>
+<ul class="facts"><li><b>Size:</b> 58 m2</li>
+<li><b>Rooms:</b> 2</li>
+<li><b>Area:</b> Chișinău</li></ul></div>
+<h3>Micro-area (local guide)</h3>
+<p>No specific nearby landmarks or transit lines are named in the ad text. Rely on on-the-ground checks (evening noise, walk times) and the report’s generic OSM proxy signals rather than assumed venue proximity.</p>
+<p><b>Do an evening pass:</b> in Chișinău, bus/trolleybus frequency, park-adjacent gatherings, and arterial-road noise can change block-by-block. If possible, check 20:00–23:00 on a weekday and a weekend.</p>
+<h3>Macro-area (local guide)</h3>
+<p><i>General background (not source-verified):</i> Chișinău varies block-by-block. Focus on road noise, building condition, and practical walkability to errands.</p>
+<h3>Orientation</h3>
+<p>Centrality proxy is not available for this listing. Key orientation/access details are not specified (floor, lift).</p>
+            
+          </div>
+        </div>
+        
+        <div class='card' id='listing-19' data-rank='19' data-has-terrace='true' data-has-parking='true' data-lively='false' data-evening-score='0.0' tabindex='0' role='button' aria-label='Focus map on ranked listing 19'>
+          <div class='rank'>#19</div>
+          <div class='title'>
+            Продажа в Кишинёве <span style='font-size:11px; color:#666; font-weight:400'> (Продажа в Кишинёве)</span>
+          </div>
+          <div class='meta'>€59,000 · 51 m2 </div>
+          <div class='badges'><span class='badge badge-terrace'>Terrace/Outdoor</span><span class='badge badge-parking'>Garage/Parking</span><span class='badge badge-quiet'>Quiet evenings (proxy)</span></div>
+          
+          <div class='links'><a target='_blank' rel='noreferrer' href='https://makler.md/chisinau/real-estate/real-estate-for-sale?page=1'><b>Ad</b></a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=47.0449,28.836'>Maps</a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=47.0449,28.836'>Street View</a></div>
+          <div class='summary'>
+            <div class="facts"><div class="factsLabel"><b>FACTS BOX (from the ad)</b></div>
+            <h3>Agent assessment — property (ad-anchored)</h3>
+<p><b>A) What the seller leans on:</b></p>
+<ul><li>No strong seller emphasis could be reliably extracted from the text.</li></ul>
+<p><b>B) Stated vs not stated (be strict):</b></p>
+<ul><li><b>Explicitly stated:</b></li><li>Key building/usage details are not clearly specified in the ad text.</li><li><b>Not stated:</b></li><li>Exact floor level / storey</li><li>Elevator / lift</li><li>Outdoor space (balcony/loggia/terrace/garden)</li><li>Parking / garage availability and terms</li><li>Energy certificate figures (HWB / fGEE)</li><li>Tenancy status (vacant vs rented, end date)</li><li>Furnishing included/excluded</li></ul>
+<p><b>C) Grounded read-between-the-lines:</b></p>
+<ul><li>If the pin is not confirmed, treat nearby-amenity context as approximate and verify the exact micro-location.</li></ul>
+<p><b>D) Viewing questions (bring these):</b></p>
+<ul><li>Which floor is it on, and is there a working elevator? (If yes: from which level?)</li><li>What exactly is included in the monthly costs (utilities, maintenance, building admin), and are there any planned increases?</li><li>Is the apartment vacant on handover, or is there an existing tenancy/occupant?</li><li>What is included in the sale (furniture/appliances), and what is excluded?</li><li>Are there upcoming building works (roof/facade/risers) and what is the reserve fund status (if applicable)?</li><li>If renovation/first-occupancy language is used: what scope is completed and what is still pending? Can you provide a written spec?</li><li>If parking is mentioned: is it included, optional, or just nearby? What are the terms and costs?</li></ul>
+<ul class="facts"><li><b>Price:</b> €59,000</li>
+<li><b>Size:</b> 51 m2</li>
+<li><b>Area:</b> Chișinău</li></ul></div>
+<h3>Micro-area (local guide)</h3>
+<p>No specific nearby landmarks or transit lines are named in the ad text. Rely on on-the-ground checks (evening noise, walk times) and the report’s generic OSM proxy signals rather than assumed venue proximity.</p>
+<p><b>Do an evening pass:</b> in Chișinău, bus/trolleybus frequency, park-adjacent gatherings, and arterial-road noise can change block-by-block. If possible, check 20:00–23:00 on a weekday and a weekend.</p>
+<h3>Macro-area (local guide)</h3>
+<p><i>General background (not source-verified):</i> Chișinău varies block-by-block. Focus on road noise, building condition, and practical walkability to errands.</p>
+<h3>Orientation</h3>
+<p>Centrality proxy is not available for this listing. Key orientation/access details are not specified (floor, lift).</p>
+            
+          </div>
+        </div>
+        
+        <div class='card' id='listing-20' data-rank='20' data-has-terrace='true' data-has-parking='true' data-lively='false' data-evening-score='0.0' tabindex='0' role='button' aria-label='Focus map on ranked listing 20'>
+          <div class='rank'>#20</div>
+          <div class='title'>
+            Apartament cu un design original, de vânzare în sectorul Râșcani al approx. pitalei <span style='font-size:11px; color:#666; font-weight:400'> (Apartament cu un design original, de vânzare în sectorul Râșcani al Capitalei)</span>
+          </div>
+          <div class='meta'> </div>
+          <div class='badges'><span class='badge badge-terrace'>Terrace/Outdoor</span><span class='badge badge-parking'>Garage/Parking</span><span class='badge badge-quiet'>Quiet evenings (proxy)</span></div>
+          
+          <div class='links'><a target='_blank' rel='noreferrer' href='https://point.md/ro/novosti/social/apartament-cu-un-design-original-de-vanzare-in-sectorul-rascani-al-capitalei/'><b>Ad</b></a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=47.0449,28.836'>Maps</a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=47.0449,28.836'>Street View</a></div>
+          <div class='summary'>
+            <div class="facts"><div class="factsLabel"><b>FACTS BOX (from the ad)</b></div>
+            <h3>Agent assessment — property (ad-anchored)</h3>
+<p><b>A) What the seller leans on:</b></p>
+<ul><li>No strong seller emphasis could be reliably extracted from the text.</li></ul>
+<p><b>B) Stated vs not stated (be strict):</b></p>
+<ul><li><b>Explicitly stated:</b></li><li>Key building/usage details are not clearly specified in the ad text.</li><li><b>Not stated:</b></li><li>Exact floor level / storey</li><li>Elevator / lift</li><li>Outdoor space (balcony/loggia/terrace/garden)</li><li>Parking / garage availability and terms</li><li>Energy certificate figures (HWB / fGEE)</li><li>Tenancy status (vacant vs rented, end date)</li><li>Furnishing included/excluded</li></ul>
+<p><b>C) Grounded read-between-the-lines:</b></p>
+<ul><li>If the pin is not confirmed, treat nearby-amenity context as approximate and verify the exact micro-location.</li></ul>
+<p><b>D) Viewing questions (bring these):</b></p>
+<ul><li>Which floor is it on, and is there a working elevator? (If yes: from which level?)</li><li>What exactly is included in the monthly costs (utilities, maintenance, building admin), and are there any planned increases?</li><li>Is the apartment vacant on handover, or is there an existing tenancy/occupant?</li><li>What is included in the sale (furniture/appliances), and what is excluded?</li><li>Are there upcoming building works (roof/facade/risers) and what is the reserve fund status (if applicable)?</li><li>If renovation/first-occupancy language is used: what scope is completed and what is still pending? Can you provide a written spec?</li><li>If parking is mentioned: is it included, optional, or just nearby? What are the terms and costs?</li></ul>
+<ul class="facts"><li><b>Area:</b> Chișinău</li></ul></div>
+<h3>Micro-area (local guide)</h3>
+<p>No specific nearby landmarks or transit lines are named in the ad text. Rely on on-the-ground checks (evening noise, walk times) and the report’s generic OSM proxy signals rather than assumed venue proximity.</p>
+<p><b>Do an evening pass:</b> in Chișinău, bus/trolleybus frequency, park-adjacent gatherings, and arterial-road noise can change block-by-block. If possible, check 20:00–23:00 on a weekday and a weekend.</p>
+<h3>Macro-area (local guide)</h3>
+<p><i>General background (not source-verified):</i> Chișinău varies block-by-block. Focus on road noise, building condition, and practical walkability to errands.</p>
+<h3>Orientation</h3>
+<p>Centrality proxy is not available for this listing. Key orientation/access details are not specified (floor, lift).</p>
+            
+          </div>
+        </div>
+        
+        <div class='card' id='listing-21' data-rank='21' data-has-terrace='true' data-has-parking='true' data-lively='false' data-evening-score='0.0' tabindex='0' role='button' aria-label='Focus map on ranked listing 21'>
+          <div class='rank'>#21</div>
+          <div class='title'>
+            Apartament cu 2 approx. mere, Buiucani, Chișinău, Chișinău mun. <span style='font-size:11px; color:#666; font-weight:400'> (Apartament cu 2 camere, Buiucani, Chișinău, Chișinău mun.)</span>
+          </div>
+          <div class='meta'>65 m2 · 2 rooms </div>
+          <div class='badges'><span class='badge badge-terrace'>Terrace/Outdoor</span><span class='badge badge-parking'>Garage/Parking</span><span class='badge badge-quiet'>Quiet evenings (proxy)</span></div>
+          
+          <div class='links'><a target='_blank' rel='noreferrer' href='https://999.md/ro/103691730'><b>Ad</b></a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=47.0335,28.8035'>Maps</a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=47.0335,28.8035'>Street View</a></div>
+          <div class='summary'>
+            <div class="facts"><div class="factsLabel"><b>FACTS BOX (from the ad)</b></div>
+            <h3>Agent assessment — property (ad-anchored)</h3>
+<p><b>A) What the seller leans on:</b></p>
+<ul><li>parking: Parcare de tip deschis, teren de joacă pentru copii.</li></ul>
+<p><b>B) Stated vs not stated (be strict):</b></p>
+<ul><li><b>Explicitly stated:</b></li><li>parking: Parcare de tip deschis, teren de joacă pentru copii.</li><li><b>Not stated:</b></li><li>Exact floor level / storey</li><li>Elevator / lift</li><li>Outdoor space (balcony/loggia/terrace/garden)</li><li>Energy certificate figures (HWB / fGEE)</li><li>Tenancy status (vacant vs rented, end date)</li><li>Furnishing included/excluded</li></ul>
+<p><b>C) Grounded read-between-the-lines:</b></p>
+<ul><li>If the pin is not confirmed, treat nearby-amenity context as approximate and verify the exact micro-location.</li></ul>
+<p><b>D) Viewing questions (bring these):</b></p>
+<ul><li>Which floor is it on, and is there a working elevator? (If yes: from which level?)</li><li>What exactly is included in the monthly costs (utilities, maintenance, building admin), and are there any planned increases?</li><li>Is the apartment vacant on handover, or is there an existing tenancy/occupant?</li><li>What is included in the sale (furniture/appliances), and what is excluded?</li><li>Are there upcoming building works (roof/facade/risers) and what is the reserve fund status (if applicable)?</li><li>If renovation/first-occupancy language is used: what scope is completed and what is still pending? Can you provide a written spec?</li><li>If parking is mentioned: is it included, optional, or just nearby? What are the terms and costs?</li></ul>
+<ul class="facts"><li><b>Size:</b> 65 m2</li>
+<li><b>Rooms:</b> 2</li>
+<li><b>Area:</b> Chișinău</li></ul></div>
+<h3>Micro-area (local guide)</h3>
+<p>No specific nearby landmarks or transit lines are named in the ad text. Rely on on-the-ground checks (evening noise, walk times) and the report’s generic OSM proxy signals rather than assumed venue proximity.</p>
+<p><b>Do an evening pass:</b> in Chișinău, bus/trolleybus frequency, park-adjacent gatherings, and arterial-road noise can change block-by-block. If possible, check 20:00–23:00 on a weekday and a weekend.</p>
+<h3>Macro-area (local guide)</h3>
+<p><i>General background (not source-verified):</i> Chișinău varies block-by-block. Focus on road noise, building condition, and practical walkability to errands.</p>
+<h3>Orientation</h3>
+<p>Centrality proxy is not available for this listing. Key orientation/access details are not specified (floor, lift).</p>
+            
+          </div>
+        </div>
+        
+        <div class='card' id='listing-22' data-rank='22' data-has-terrace='true' data-has-parking='true' data-lively='false' data-evening-score='0.0' tabindex='0' role='button' aria-label='Focus map on ranked listing 22'>
+          <div class='rank'>#22</div>
+          <div class='title'>
+            Apartament cu 1 approx. meră, Buiucani, Chișinău, Chișinău mun. <span style='font-size:11px; color:#666; font-weight:400'> (Apartament cu 1 cameră, Buiucani, Chișinău, Chișinău mun.)</span>
+          </div>
+          <div class='meta'>49 m2 </div>
+          <div class='badges'><span class='badge badge-terrace'>Terrace/Outdoor</span><span class='badge badge-parking'>Garage/Parking</span><span class='badge badge-quiet'>Quiet evenings (proxy)</span></div>
+          
+          <div class='links'><a target='_blank' rel='noreferrer' href='https://999.md/ro/103590018'><b>Ad</b></a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=47.0335,28.8035'>Maps</a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=47.0335,28.8035'>Street View</a></div>
+          <div class='summary'>
+            <div class="facts"><div class="factsLabel"><b>FACTS BOX (from the ad)</b></div>
+            <h3>Agent assessment — property (ad-anchored)</h3>
+<p><b>A) What the seller leans on:</b></p>
+<ul><li>No strong seller emphasis could be reliably extracted from the text.</li></ul>
+<p><b>B) Stated vs not stated (be strict):</b></p>
+<ul><li><b>Explicitly stated:</b></li><li>Key building/usage details are not clearly specified in the ad text.</li><li><b>Not stated:</b></li><li>Exact floor level / storey</li><li>Elevator / lift</li><li>Outdoor space (balcony/loggia/terrace/garden)</li><li>Parking / garage availability and terms</li><li>Energy certificate figures (HWB / fGEE)</li><li>Tenancy status (vacant vs rented, end date)</li><li>Furnishing included/excluded</li></ul>
+<p><b>C) Grounded read-between-the-lines:</b></p>
+<ul><li>If the pin is not confirmed, treat nearby-amenity context as approximate and verify the exact micro-location.</li></ul>
+<p><b>D) Viewing questions (bring these):</b></p>
+<ul><li>Which floor is it on, and is there a working elevator? (If yes: from which level?)</li><li>What exactly is included in the monthly costs (utilities, maintenance, building admin), and are there any planned increases?</li><li>Is the apartment vacant on handover, or is there an existing tenancy/occupant?</li><li>What is included in the sale (furniture/appliances), and what is excluded?</li><li>Are there upcoming building works (roof/facade/risers) and what is the reserve fund status (if applicable)?</li><li>If renovation/first-occupancy language is used: what scope is completed and what is still pending? Can you provide a written spec?</li><li>If parking is mentioned: is it included, optional, or just nearby? What are the terms and costs?</li></ul>
+<ul class="facts"><li><b>Size:</b> 49 m2</li>
+<li><b>Area:</b> Chișinău</li></ul></div>
+<h3>Micro-area (local guide)</h3>
+<p>No specific nearby landmarks or transit lines are named in the ad text. Rely on on-the-ground checks (evening noise, walk times) and the report’s generic OSM proxy signals rather than assumed venue proximity.</p>
+<p><b>Do an evening pass:</b> in Chișinău, bus/trolleybus frequency, park-adjacent gatherings, and arterial-road noise can change block-by-block. If possible, check 20:00–23:00 on a weekday and a weekend.</p>
+<h3>Macro-area (local guide)</h3>
+<p><i>General background (not source-verified):</i> Chișinău varies block-by-block. Focus on road noise, building condition, and practical walkability to errands.</p>
+<h3>Orientation</h3>
+<p>Centrality proxy is not available for this listing. Key orientation/access details are not specified (floor, lift).</p>
+            
+          </div>
+        </div>
+        
+        <div class='card' id='listing-23' data-rank='23' data-has-terrace='true' data-has-parking='true' data-lively='false' data-evening-score='0.0' tabindex='0' role='button' aria-label='Focus map on ranked listing 23'>
+          <div class='rank'>#23</div>
+          <div class='title'>
+            Apartament cu 2 approx. mere, Ciocana, Chișinău, Chișinău mun. <span style='font-size:11px; color:#666; font-weight:400'> (Apartament cu 2 camere, Ciocana, Chișinău, Chișinău mun.)</span>
+          </div>
+          <div class='meta'>71 m2 · 2 rooms </div>
+          <div class='badges'><span class='badge badge-terrace'>Terrace/Outdoor</span><span class='badge badge-parking'>Garage/Parking</span><span class='badge badge-quiet'>Quiet evenings (proxy)</span></div>
+          
+          <div class='links'><a target='_blank' rel='noreferrer' href='https://999.md/ro/103797011'><b>Ad</b></a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=47.055,28.889'>Maps</a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=47.055,28.889'>Street View</a></div>
+          <div class='summary'>
+            <div class="facts"><div class="factsLabel"><b>FACTS BOX (from the ad)</b></div>
+            <h3>Agent assessment — property (ad-anchored)</h3>
+<p><b>A) What the seller leans on:</b></p>
+<ul><li>No strong seller emphasis could be reliably extracted from the text.</li></ul>
+<p><b>B) Stated vs not stated (be strict):</b></p>
+<ul><li><b>Explicitly stated:</b></li><li>Key building/usage details are not clearly specified in the ad text.</li><li><b>Not stated:</b></li><li>Exact floor level / storey</li><li>Elevator / lift</li><li>Outdoor space (balcony/loggia/terrace/garden)</li><li>Parking / garage availability and terms</li><li>Energy certificate figures (HWB / fGEE)</li><li>Tenancy status (vacant vs rented, end date)</li><li>Furnishing included/excluded</li></ul>
+<p><b>C) Grounded read-between-the-lines:</b></p>
+<ul><li>If the pin is not confirmed, treat nearby-amenity context as approximate and verify the exact micro-location.</li></ul>
+<p><b>D) Viewing questions (bring these):</b></p>
+<ul><li>Which floor is it on, and is there a working elevator? (If yes: from which level?)</li><li>What exactly is included in the monthly costs (utilities, maintenance, building admin), and are there any planned increases?</li><li>Is the apartment vacant on handover, or is there an existing tenancy/occupant?</li><li>What is included in the sale (furniture/appliances), and what is excluded?</li><li>Are there upcoming building works (roof/facade/risers) and what is the reserve fund status (if applicable)?</li><li>If renovation/first-occupancy language is used: what scope is completed and what is still pending? Can you provide a written spec?</li><li>If parking is mentioned: is it included, optional, or just nearby? What are the terms and costs?</li></ul>
+<ul class="facts"><li><b>Size:</b> 71 m2</li>
+<li><b>Rooms:</b> 2</li>
+<li><b>Area:</b> Chișinău</li></ul></div>
+<h3>Micro-area (local guide)</h3>
+<p>No specific nearby landmarks or transit lines are named in the ad text. Rely on on-the-ground checks (evening noise, walk times) and the report’s generic OSM proxy signals rather than assumed venue proximity.</p>
+<p><b>Do an evening pass:</b> in Chișinău, bus/trolleybus frequency, park-adjacent gatherings, and arterial-road noise can change block-by-block. If possible, check 20:00–23:00 on a weekday and a weekend.</p>
+<h3>Macro-area (local guide)</h3>
+<p><i>General background (not source-verified):</i> Chișinău varies block-by-block. Focus on road noise, building condition, and practical walkability to errands.</p>
+<h3>Orientation</h3>
+<p>Centrality proxy is not available for this listing. Key orientation/access details are not specified (floor, lift).</p>
+            
+          </div>
+        </div>
+        
+        <div class='card' id='listing-24' data-rank='24' data-has-terrace='true' data-has-parking='true' data-lively='false' data-evening-score='0.0' tabindex='0' role='button' aria-label='Focus map on ranked listing 24'>
+          <div class='rank'>#24</div>
+          <div class='title'>
+            Apartament cu 3 approx. mere, Ciocana, Chișinău, Chișinău mun. <span style='font-size:11px; color:#666; font-weight:400'> (Apartament cu 3 camere, Ciocana, Chișinău, Chișinău mun.)</span>
+          </div>
+          <div class='meta'>73 m2 · 3 rooms </div>
+          <div class='badges'><span class='badge badge-terrace'>Terrace/Outdoor</span><span class='badge badge-parking'>Garage/Parking</span><span class='badge badge-quiet'>Quiet evenings (proxy)</span></div>
+          
+          <div class='links'><a target='_blank' rel='noreferrer' href='https://999.md/ro/103766843'><b>Ad</b></a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=47.055,28.889'>Maps</a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=47.055,28.889'>Street View</a></div>
+          <div class='summary'>
+            <div class="facts"><div class="factsLabel"><b>FACTS BOX (from the ad)</b></div>
+            <h3>Agent assessment — property (ad-anchored)</h3>
+<p><b>A) What the seller leans on:</b></p>
+<ul><li>parking: parcare individual , debara pe etaj!! Încălzire autonomă!!</li></ul>
+<p><b>B) Stated vs not stated (be strict):</b></p>
+<ul><li><b>Explicitly stated:</b></li><li>parking: parcare individual , debara pe etaj!! Încălzire autonomă!!</li><li><b>Not stated:</b></li><li>Exact floor level / storey</li><li>Elevator / lift</li><li>Outdoor space (balcony/loggia/terrace/garden)</li><li>Energy certificate figures (HWB / fGEE)</li><li>Tenancy status (vacant vs rented, end date)</li><li>Furnishing included/excluded</li></ul>
+<p><b>C) Grounded read-between-the-lines:</b></p>
+<ul><li>If the pin is not confirmed, treat nearby-amenity context as approximate and verify the exact micro-location.</li></ul>
+<p><b>D) Viewing questions (bring these):</b></p>
+<ul><li>Which floor is it on, and is there a working elevator? (If yes: from which level?)</li><li>What exactly is included in the monthly costs (utilities, maintenance, building admin), and are there any planned increases?</li><li>Is the apartment vacant on handover, or is there an existing tenancy/occupant?</li><li>What is included in the sale (furniture/appliances), and what is excluded?</li><li>Are there upcoming building works (roof/facade/risers) and what is the reserve fund status (if applicable)?</li><li>If renovation/first-occupancy language is used: what scope is completed and what is still pending? Can you provide a written spec?</li><li>If parking is mentioned: is it included, optional, or just nearby? What are the terms and costs?</li></ul>
+<ul class="facts"><li><b>Size:</b> 73 m2</li>
+<li><b>Rooms:</b> 3</li>
+<li><b>Area:</b> Chișinău</li></ul></div>
+<h3>Micro-area (local guide)</h3>
+<p>No specific nearby landmarks or transit lines are named in the ad text. Rely on on-the-ground checks (evening noise, walk times) and the report’s generic OSM proxy signals rather than assumed venue proximity.</p>
+<p><b>Do an evening pass:</b> in Chișinău, bus/trolleybus frequency, park-adjacent gatherings, and arterial-road noise can change block-by-block. If possible, check 20:00–23:00 on a weekday and a weekend.</p>
+<h3>Macro-area (local guide)</h3>
+<p><i>General background (not source-verified):</i> Chișinău varies block-by-block. Focus on road noise, building condition, and practical walkability to errands.</p>
+<h3>Orientation</h3>
+<p>Centrality proxy is not available for this listing. Key orientation/access details are not specified (floor, lift).</p>
+            
+          </div>
+        </div>
+        
+        <div class='card' id='listing-25' data-rank='25' data-has-terrace='true' data-has-parking='true' data-lively='false' data-evening-score='0.0' tabindex='0' role='button' aria-label='Focus map on ranked listing 25'>
+          <div class='rank'>#25</div>
+          <div class='title'>
+            Apartament cu 1 approx. meră, Ciocana, Chișinău, Chișinău mun. <span style='font-size:11px; color:#666; font-weight:400'> (Apartament cu 1 cameră, Ciocana, Chișinău, Chișinău mun.)</span>
+          </div>
+          <div class='meta'>37 m2 </div>
+          <div class='badges'><span class='badge badge-terrace'>Terrace/Outdoor</span><span class='badge badge-parking'>Garage/Parking</span><span class='badge badge-quiet'>Quiet evenings (proxy)</span></div>
+          
+          <div class='links'><a target='_blank' rel='noreferrer' href='https://999.md/ro/103387250'><b>Ad</b></a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=47.055,28.889'>Maps</a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=47.055,28.889'>Street View</a></div>
+          <div class='summary'>
+            <div class="facts"><div class="factsLabel"><b>FACTS BOX (from the ad)</b></div>
+            <h3>Agent assessment — property (ad-anchored)</h3>
+<p><b>A) What the seller leans on:</b></p>
+<ul><li>parking: Parcare de tip deschis, teren de joacă pentru copii.</li></ul>
+<p><b>B) Stated vs not stated (be strict):</b></p>
+<ul><li><b>Explicitly stated:</b></li><li>parking: Parcare de tip deschis, teren de joacă pentru copii.</li><li><b>Not stated:</b></li><li>Exact floor level / storey</li><li>Elevator / lift</li><li>Outdoor space (balcony/loggia/terrace/garden)</li><li>Energy certificate figures (HWB / fGEE)</li><li>Tenancy status (vacant vs rented, end date)</li><li>Furnishing included/excluded</li></ul>
+<p><b>C) Grounded read-between-the-lines:</b></p>
+<ul><li>If the pin is not confirmed, treat nearby-amenity context as approximate and verify the exact micro-location.</li></ul>
+<p><b>D) Viewing questions (bring these):</b></p>
+<ul><li>Which floor is it on, and is there a working elevator? (If yes: from which level?)</li><li>What exactly is included in the monthly costs (utilities, maintenance, building admin), and are there any planned increases?</li><li>Is the apartment vacant on handover, or is there an existing tenancy/occupant?</li><li>What is included in the sale (furniture/appliances), and what is excluded?</li><li>Are there upcoming building works (roof/facade/risers) and what is the reserve fund status (if applicable)?</li><li>If renovation/first-occupancy language is used: what scope is completed and what is still pending? Can you provide a written spec?</li><li>If parking is mentioned: is it included, optional, or just nearby? What are the terms and costs?</li></ul>
+<ul class="facts"><li><b>Size:</b> 37 m2</li>
+<li><b>Area:</b> Chișinău</li></ul></div>
+<h3>Micro-area (local guide)</h3>
+<p>No specific nearby landmarks or transit lines are named in the ad text. Rely on on-the-ground checks (evening noise, walk times) and the report’s generic OSM proxy signals rather than assumed venue proximity.</p>
+<p><b>Do an evening pass:</b> in Chișinău, bus/trolleybus frequency, park-adjacent gatherings, and arterial-road noise can change block-by-block. If possible, check 20:00–23:00 on a weekday and a weekend.</p>
+<h3>Macro-area (local guide)</h3>
+<p><i>General background (not source-verified):</i> Chișinău varies block-by-block. Focus on road noise, building condition, and practical walkability to errands.</p>
+<h3>Orientation</h3>
+<p>Centrality proxy is not available for this listing. Key orientation/access details are not specified (floor, lift).</p>
+            
+          </div>
+        </div>
+        
+        <div class='card' id='listing-26' data-rank='26' data-has-terrace='true' data-has-parking='true' data-lively='false' data-evening-score='0.0' tabindex='0' role='button' aria-label='Focus map on ranked listing 26'>
+          <div class='rank'>#26</div>
+          <div class='title'>
+            Apartament cu 3 approx. mere, Ciocana, Chișinău, Chișinău mun. <span style='font-size:11px; color:#666; font-weight:400'> (Apartament cu 3 camere, Ciocana, Chișinău, Chișinău mun.)</span>
+          </div>
+          <div class='meta'>90 m2 · 3 rooms </div>
+          <div class='badges'><span class='badge badge-terrace'>Terrace/Outdoor</span><span class='badge badge-parking'>Garage/Parking</span><span class='badge badge-quiet'>Quiet evenings (proxy)</span></div>
+          
+          <div class='links'><a target='_blank' rel='noreferrer' href='https://999.md/ro/102644224'><b>Ad</b></a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=47.055,28.889'>Maps</a> · <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=47.055,28.889'>Street View</a></div>
+          <div class='summary'>
+            <div class="facts"><div class="factsLabel"><b>FACTS BOX (from the ad)</b></div>
+            <h3>Agent assessment — property (ad-anchored)</h3>
+<p><b>A) What the seller leans on:</b></p>
+<ul><li>No strong seller emphasis could be reliably extracted from the text.</li></ul>
+<p><b>B) Stated vs not stated (be strict):</b></p>
+<ul><li><b>Explicitly stated:</b></li><li>Key building/usage details are not clearly specified in the ad text.</li><li><b>Not stated:</b></li><li>Exact floor level / storey</li><li>Elevator / lift</li><li>Outdoor space (balcony/loggia/terrace/garden)</li><li>Parking / garage availability and terms</li><li>Energy certificate figures (HWB / fGEE)</li><li>Tenancy status (vacant vs rented, end date)</li><li>Furnishing included/excluded</li></ul>
+<p><b>C) Grounded read-between-the-lines:</b></p>
+<ul><li>If the pin is not confirmed, treat nearby-amenity context as approximate and verify the exact micro-location.</li></ul>
+<p><b>D) Viewing questions (bring these):</b></p>
+<ul><li>Which floor is it on, and is there a working elevator? (If yes: from which level?)</li><li>What exactly is included in the monthly costs (utilities, maintenance, building admin), and are there any planned increases?</li><li>Is the apartment vacant on handover, or is there an existing tenancy/occupant?</li><li>What is included in the sale (furniture/appliances), and what is excluded?</li><li>Are there upcoming building works (roof/facade/risers) and what is the reserve fund status (if applicable)?</li><li>If renovation/first-occupancy language is used: what scope is completed and what is still pending? Can you provide a written spec?</li><li>If parking is mentioned: is it included, optional, or just nearby? What are the terms and costs?</li></ul>
+<ul class="facts"><li><b>Size:</b> 90 m2</li>
+<li><b>Rooms:</b> 3</li>
+<li><b>Area:</b> Chișinău</li></ul></div>
+<h3>Micro-area (local guide)</h3>
+<p>No specific nearby landmarks or transit lines are named in the ad text. Rely on on-the-ground checks (evening noise, walk times) and the report’s generic OSM proxy signals rather than assumed venue proximity.</p>
+<p><b>Do an evening pass:</b> in Chișinău, bus/trolleybus frequency, park-adjacent gatherings, and arterial-road noise can change block-by-block. If possible, check 20:00–23:00 on a weekday and a weekend.</p>
+<h3>Macro-area (local guide)</h3>
+<p><i>General background (not source-verified):</i> Chișinău varies block-by-block. Focus on road noise, building condition, and practical walkability to errands.</p>
+<h3>Orientation</h3>
+<p>Centrality proxy is not available for this listing. Key orientation/access details are not specified (floor, lift).</p>
+            
+          </div>
+        </div>
+        
+      </div>
+    </div>
+    <div class='right'>
+      <div id='map'></div>
+    </div>
+  </div>
+
+  <script>
+  
+    const map = L.map('map', { preferCanvas: true });
+
+    // Panes: ensure overlays never block marker clicks.
+    map.createPane('sectorPane');
+    map.getPane('sectorPane').style.zIndex = 250;
+    map.getPane('sectorPane').style.pointerEvents = 'none';
+
+    map.createPane('gridPane');
+    map.getPane('gridPane').style.zIndex = 300;
+    map.getPane('gridPane').style.pointerEvents = 'none';
+
+    map.createPane('pinPane');
+    map.getPane('pinPane').style.zIndex = 650;
+
+    map.createPane('pinTooltipPane');
+    map.getPane('pinTooltipPane').style.zIndex = 720;
+
+    const overlayRenderer = L.canvas({ padding: 0.5, pane: 'gridPane' });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' }).addTo(map);
+
+    const points = [{"rank": 1, "lat": 47.0449, "lng": 28.836, "sector": null, "pin": "unconfirmed", "tooltip": "<div style='font-size:11px;line-height:1.1'><b>outdoor space</b></div>", "popup": "<div class='popup'><h3 style='margin:0 0 6px 0; font-size:14px'>Apartament de vanzare Chisinau, chirie și cumpărare de apartamente în Moldova <span style='font-size:11px; color:#666; font-weight:400'>(Apartament de vanzare Chisinau, chirie și cumpărare de apartamente în Moldova)</span></h3><div><a target='_blank' rel='noreferrer' href='https://999.md/ro/list/real-estate/apartments-and-rooms'><b>Ad</b></a></div><div style='margin-top:6px'><a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=47.0449,28.836'>Google Maps</a> | <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=47.0449,28.836'>Street View</a></div></div>"}, {"rank": 2, "lat": 47.0335, "lng": 28.8035, "sector": null, "pin": "unconfirmed", "tooltip": "<div style='font-size:11px;line-height:1.1'><b>outdoor space</b></div>", "popup": "<div class='popup'><h3 style='margin:0 0 6px 0; font-size:14px'>Panou de anunțuri - 999.md <span style='font-size:11px; color:#666; font-weight:400'>(Panou de anunțuri - 999.md)</span></h3><div><a target='_blank' rel='noreferrer' href='https://999.md/ro'><b>Ad</b></a></div><div style='margin-top:6px'><a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=47.0335,28.8035'>Google Maps</a> | <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=47.0335,28.8035'>Street View</a></div></div>"}, {"rank": 3, "lat": 47.0335, "lng": 28.8035, "sector": null, "pin": "unconfirmed", "tooltip": "<div style='font-size:11px;line-height:1.1'><b>€114,900 · outdoor space</b></div>", "popup": "<div class='popup'><h3 style='margin:0 0 6px 0; font-size:14px'>Vânzare apartamente, approx. mere din Chişinău <span style='font-size:11px; color:#666; font-weight:400'>(Vânzare apartamente, camere din Chişinău)</span></h3><div><a target='_blank' rel='noreferrer' href='https://makler.md/md/chisinau/real-estate/real-estate-for-sale/apartments-for-sale?list&amp;list=detail'><b>Ad</b></a></div><div style='margin-top:6px'><a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=47.0335,28.8035'>Google Maps</a> | <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=47.0335,28.8035'>Street View</a></div></div>"}, {"rank": 4, "lat": 47.055, "lng": 28.889, "sector": null, "pin": "unconfirmed", "tooltip": "<div style='font-size:11px;line-height:1.1'><b>€114,900 · outdoor space</b></div>", "popup": "<div class='popup'><h3 style='margin:0 0 6px 0; font-size:14px'>Vânzare apartamente, approx. mere din Chişinău <span style='font-size:11px; color:#666; font-weight:400'>(Vânzare apartamente, camere din Chişinău)</span></h3><div><a target='_blank' rel='noreferrer' href='https://makler.md/md/chisinau/real-estate/real-estate-for-sale/apartments-for-sale'><b>Ad</b></a></div><div style='margin-top:6px'><a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=47.055,28.889'>Google Maps</a> | <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=47.055,28.889'>Street View</a></div></div>"}, {"rank": 5, "lat": 46.9979, "lng": 28.8576, "sector": null, "pin": "unconfirmed", "tooltip": "<div style='font-size:11px;line-height:1.1'><b>3 rooms · outdoor space</b></div>", "popup": "<div class='popup'><h3 style='margin:0 0 6px 0; font-size:14px'>Apartament cu 3 approx. mere, Botanica, Chișinău, Chișinău mun. <span style='font-size:11px; color:#666; font-weight:400'>(Apartament cu 3 camere, Botanica, Chișinău, Chișinău mun.)</span></h3><div><a target='_blank' rel='noreferrer' href='https://999.md/ro/103738242'><b>Ad</b></a></div><div style='margin-top:6px'><a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=46.9979,28.8576'>Google Maps</a> | <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=46.9979,28.8576'>Street View</a></div></div>"}, {"rank": 6, "lat": 46.9979, "lng": 28.8576, "sector": null, "pin": "unconfirmed", "tooltip": "<div style='font-size:11px;line-height:1.1'><b>outdoor space</b></div>", "popup": "<div class='popup'><h3 style='margin:0 0 6px 0; font-size:14px'>Apartament cu 1 approx. meră, Botanica, Chișinău, Chișinău mun. <span style='font-size:11px; color:#666; font-weight:400'>(Apartament cu 1 cameră, Botanica, Chișinău, Chișinău mun.)</span></h3><div><a target='_blank' rel='noreferrer' href='https://999.md/ro/103368292'><b>Ad</b></a></div><div style='margin-top:6px'><a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=46.9979,28.8576'>Google Maps</a> | <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=46.9979,28.8576'>Street View</a></div></div>"}, {"rank": 7, "lat": 46.9979, "lng": 28.8576, "sector": null, "pin": "unconfirmed", "tooltip": "<div style='font-size:11px;line-height:1.1'><b>2 rooms · outdoor space</b></div>", "popup": "<div class='popup'><h3 style='margin:0 0 6px 0; font-size:14px'>Apartament cu 2 approx. mere, Botanica, Chișinău, Chișinău mun. <span style='font-size:11px; color:#666; font-weight:400'>(Apartament cu 2 camere, Botanica, Chișinău, Chișinău mun.)</span></h3><div><a target='_blank' rel='noreferrer' href='https://999.md/ro/100725327'><b>Ad</b></a></div><div style='margin-top:6px'><a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=46.9979,28.8576'>Google Maps</a> | <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=46.9979,28.8576'>Street View</a></div></div>"}, {"rank": 8, "lat": 46.9979, "lng": 28.8576, "sector": null, "pin": "unconfirmed", "tooltip": "<div style='font-size:11px;line-height:1.1'><b>2 rooms · outdoor space</b></div>", "popup": "<div class='popup'><h3 style='margin:0 0 6px 0; font-size:14px'>Apartament cu 2 approx. mere, Botanica, Chișinău, Chișinău mun. <span style='font-size:11px; color:#666; font-weight:400'>(Apartament cu 2 camere, Botanica, Chișinău, Chișinău mun.)</span></h3><div><a target='_blank' rel='noreferrer' href='https://999.md/ro/101883370'><b>Ad</b></a></div><div style='margin-top:6px'><a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=46.9979,28.8576'>Google Maps</a> | <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=46.9979,28.8576'>Street View</a></div></div>"}, {"rank": 9, "lat": 46.9979, "lng": 28.8576, "sector": null, "pin": "unconfirmed", "tooltip": "<div style='font-size:11px;line-height:1.1'><b>€139,000 · outdoor space</b></div>", "popup": "<div class='popup'><h3 style='margin:0 0 6px 0; font-size:14px'>Apartament cu 2 approx. mere, Botanica 139000 € <span style='font-size:11px; color:#666; font-weight:400'>(Apartament cu 2 camere, Botanica 139000 €)</span></h3><div><a target='_blank' rel='noreferrer' href='https://makler.md/real-estate/real-estate-for-sale/apartments-for-sale/an/1465084'><b>Ad</b></a></div><div style='margin-top:6px'><a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=46.9979,28.8576'>Google Maps</a> | <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=46.9979,28.8576'>Street View</a></div></div>"}, {"rank": 10, "lat": 46.9979, "lng": 28.8576, "sector": null, "pin": "unconfirmed", "tooltip": "<div style='font-size:11px;line-height:1.1'><b>€114,900 · outdoor space</b></div>", "popup": "<div class='popup'><h3 style='margin:0 0 6px 0; font-size:14px'>Vânzare apartamente, approx. mere din Chişinău <span style='font-size:11px; color:#666; font-weight:400'>(Vânzare apartamente, camere din Chişinău)</span></h3><div><a target='_blank' rel='noreferrer' href='https://makler.md/md/chisinau/real-estate/real-estate-for-sale/apartments-for-sale?list&amp;currency_id=5&amp;list=detail'><b>Ad</b></a></div><div style='margin-top:6px'><a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=46.9979,28.8576'>Google Maps</a> | <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=46.9979,28.8576'>Street View</a></div></div>"}, {"rank": 11, "lat": 46.9979, "lng": 28.8576, "sector": null, "pin": "unconfirmed", "tooltip": "<div style='font-size:11px;line-height:1.1'><b>€75,500 · outdoor space</b></div>", "popup": "<div class='popup'><h3 style='margin:0 0 6px 0; font-size:14px'>Chișinău, Botanica Dimineții Vă propunem spre vânzare apartament în 75500 € <span style='font-size:11px; color:#666; font-weight:400'>(Chișinău, Botanica Dimineții Vă propunem spre vânzare apartament în 75500 €)</span></h3><div><a target='_blank' rel='noreferrer' href='https://makler.md/real-estate/real-estate-for-sale/apartments-for-sale/an/1418103'><b>Ad</b></a></div><div style='margin-top:6px'><a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=46.9979,28.8576'>Google Maps</a> | <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=46.9979,28.8576'>Street View</a></div></div>"}, {"rank": 12, "lat": 46.9979, "lng": 28.8576, "sector": null, "pin": "unconfirmed", "tooltip": "<div style='font-size:11px;line-height:1.1'><b>€60,000 · outdoor space</b></div>", "popup": "<div class='popup'><h3 style='margin:0 0 6px 0; font-size:14px'>Vă propunem spre vânzare acestapartament cu 1 approx. meră, sect. Botanica, 60000 € <span style='font-size:11px; color:#666; font-weight:400'>(Vă propunem spre vânzare acestapartament cu 1 cameră, sect. Botanica, 60000 €)</span></h3><div><a target='_blank' rel='noreferrer' href='https://makler.md/real-estate/real-estate-for-sale/apartments-for-sale/an/1426821'><b>Ad</b></a></div><div style='margin-top:6px'><a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=46.9979,28.8576'>Google Maps</a> | <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=46.9979,28.8576'>Street View</a></div></div>"}, {"rank": 13, "lat": 46.9979, "lng": 28.8576, "sector": null, "pin": "unconfirmed", "tooltip": "<div style='font-size:11px;line-height:1.1'><b>€63,500 · outdoor space</b></div>", "popup": "<div class='popup'><h3 style='margin:0 0 6px 0; font-size:14px'>Chișinău, Botanica Cetatea Alba Vă propunem spre vânzare acest 63500 € <span style='font-size:11px; color:#666; font-weight:400'>(Chișinău, Botanica Cetatea Alba Vă propunem spre vânzare acest 63500 €)</span></h3><div><a target='_blank' rel='noreferrer' href='https://makler.md/real-estate/real-estate-for-sale/apartments-for-sale/an/1415090'><b>Ad</b></a></div><div style='margin-top:6px'><a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=46.9979,28.8576'>Google Maps</a> | <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=46.9979,28.8576'>Street View</a></div></div>"}, {"rank": 14, "lat": 47.0449, "lng": 28.836, "sector": null, "pin": "unconfirmed", "tooltip": "<div style='font-size:11px;line-height:1.1'><b>€95,000 · outdoor space</b></div>", "popup": "<div class='popup'><h3 style='margin:0 0 6px 0; font-size:14px'>Apartament cu 1 approx. meră, Râșcani, Chișinău, Chișinău mun. <span style='font-size:11px; color:#666; font-weight:400'>(Apartament cu 1 cameră, Râșcani, Chișinău, Chișinău mun.)</span></h3><div><a target='_blank' rel='noreferrer' href='https://999.md/ro/103770436'><b>Ad</b></a></div><div style='margin-top:6px'><a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=47.0449,28.836'>Google Maps</a> | <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=47.0449,28.836'>Street View</a></div></div>"}, {"rank": 15, "lat": 47.0449, "lng": 28.836, "sector": null, "pin": "unconfirmed", "tooltip": "<div style='font-size:11px;line-height:1.1'><b>2 rooms · outdoor space</b></div>", "popup": "<div class='popup'><h3 style='margin:0 0 6px 0; font-size:14px'>Apartament cu 2 approx. mere, Râșcani, Chișinău, Chișinău mun. <span style='font-size:11px; color:#666; font-weight:400'>(Apartament cu 2 camere, Râșcani, Chișinău, Chișinău mun.)</span></h3><div><a target='_blank' rel='noreferrer' href='https://999.md/ro/103747498'><b>Ad</b></a></div><div style='margin-top:6px'><a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=47.0449,28.836'>Google Maps</a> | <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=47.0449,28.836'>Street View</a></div></div>"}, {"rank": 16, "lat": 47.0449, "lng": 28.836, "sector": null, "pin": "unconfirmed", "tooltip": "<div style='font-size:11px;line-height:1.1'><b>3 rooms · outdoor space</b></div>", "popup": "<div class='popup'><h3 style='margin:0 0 6px 0; font-size:14px'>Apartament cu 3 approx. mere, Râșcani, Chișinău, Chișinău mun. <span style='font-size:11px; color:#666; font-weight:400'>(Apartament cu 3 camere, Râșcani, Chișinău, Chișinău mun.)</span></h3><div><a target='_blank' rel='noreferrer' href='https://999.md/ro/102240633'><b>Ad</b></a></div><div style='margin-top:6px'><a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=47.0449,28.836'>Google Maps</a> | <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=47.0449,28.836'>Street View</a></div></div>"}, {"rank": 17, "lat": 47.0449, "lng": 28.836, "sector": null, "pin": "unconfirmed", "tooltip": "<div style='font-size:11px;line-height:1.1'><b>outdoor space</b></div>", "popup": "<div class='popup'><h3 style='margin:0 0 6px 0; font-size:14px'>Imobiliare Moldova, anunțuri de cumpărare și vânzare de bunuri imobiliare în Chisinau, PMR si Moldova - 999.md <span style='font-size:11px; color:#666; font-weight:400'>(Imobiliare Moldova, anunțuri de cumpărare și vânzare de bunuri imobiliare în Chisinau, PMR si Moldova | 999.md)</span></h3><div><a target='_blank' rel='noreferrer' href='https://999.md/ro/category/real-estate'><b>Ad</b></a></div><div style='margin-top:6px'><a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=47.0449,28.836'>Google Maps</a> | <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=47.0449,28.836'>Street View</a></div></div>"}, {"rank": 18, "lat": 47.0449, "lng": 28.836, "sector": null, "pin": "unconfirmed", "tooltip": "<div style='font-size:11px;line-height:1.1'><b>2 rooms · outdoor space</b></div>", "popup": "<div class='popup'><h3 style='margin:0 0 6px 0; font-size:14px'>Apartament cu 2 approx. mere, Râșcani, Chișinău, Chișinău mun. <span style='font-size:11px; color:#666; font-weight:400'>(Apartament cu 2 camere, Râșcani, Chișinău, Chișinău mun.)</span></h3><div><a target='_blank' rel='noreferrer' href='https://999.md/ro/102961127'><b>Ad</b></a></div><div style='margin-top:6px'><a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=47.0449,28.836'>Google Maps</a> | <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=47.0449,28.836'>Street View</a></div></div>"}, {"rank": 19, "lat": 47.0449, "lng": 28.836, "sector": null, "pin": "unconfirmed", "tooltip": "<div style='font-size:11px;line-height:1.1'><b>€59,000 · outdoor space</b></div>", "popup": "<div class='popup'><h3 style='margin:0 0 6px 0; font-size:14px'>Продажа в Кишинёве <span style='font-size:11px; color:#666; font-weight:400'>(Продажа в Кишинёве)</span></h3><div><a target='_blank' rel='noreferrer' href='https://makler.md/chisinau/real-estate/real-estate-for-sale?page=1'><b>Ad</b></a></div><div style='margin-top:6px'><a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=47.0449,28.836'>Google Maps</a> | <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=47.0449,28.836'>Street View</a></div></div>"}, {"rank": 20, "lat": 47.0449, "lng": 28.836, "sector": null, "pin": "unconfirmed", "tooltip": "<div style='font-size:11px;line-height:1.1'><b>outdoor space</b></div>", "popup": "<div class='popup'><h3 style='margin:0 0 6px 0; font-size:14px'>Apartament cu un design original, de vânzare în sectorul Râșcani al approx. pitalei <span style='font-size:11px; color:#666; font-weight:400'>(Apartament cu un design original, de vânzare în sectorul Râșcani al Capitalei)</span></h3><div><a target='_blank' rel='noreferrer' href='https://point.md/ro/novosti/social/apartament-cu-un-design-original-de-vanzare-in-sectorul-rascani-al-capitalei/'><b>Ad</b></a></div><div style='margin-top:6px'><a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=47.0449,28.836'>Google Maps</a> | <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=47.0449,28.836'>Street View</a></div></div>"}, {"rank": 21, "lat": 47.0335, "lng": 28.8035, "sector": null, "pin": "unconfirmed", "tooltip": "<div style='font-size:11px;line-height:1.1'><b>2 rooms · outdoor space</b></div>", "popup": "<div class='popup'><h3 style='margin:0 0 6px 0; font-size:14px'>Apartament cu 2 approx. mere, Buiucani, Chișinău, Chișinău mun. <span style='font-size:11px; color:#666; font-weight:400'>(Apartament cu 2 camere, Buiucani, Chișinău, Chișinău mun.)</span></h3><div><a target='_blank' rel='noreferrer' href='https://999.md/ro/103691730'><b>Ad</b></a></div><div style='margin-top:6px'><a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=47.0335,28.8035'>Google Maps</a> | <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=47.0335,28.8035'>Street View</a></div></div>"}, {"rank": 22, "lat": 47.0335, "lng": 28.8035, "sector": null, "pin": "unconfirmed", "tooltip": "<div style='font-size:11px;line-height:1.1'><b>outdoor space</b></div>", "popup": "<div class='popup'><h3 style='margin:0 0 6px 0; font-size:14px'>Apartament cu 1 approx. meră, Buiucani, Chișinău, Chișinău mun. <span style='font-size:11px; color:#666; font-weight:400'>(Apartament cu 1 cameră, Buiucani, Chișinău, Chișinău mun.)</span></h3><div><a target='_blank' rel='noreferrer' href='https://999.md/ro/103590018'><b>Ad</b></a></div><div style='margin-top:6px'><a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=47.0335,28.8035'>Google Maps</a> | <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=47.0335,28.8035'>Street View</a></div></div>"}, {"rank": 23, "lat": 47.055, "lng": 28.889, "sector": null, "pin": "unconfirmed", "tooltip": "<div style='font-size:11px;line-height:1.1'><b>2 rooms · outdoor space</b></div>", "popup": "<div class='popup'><h3 style='margin:0 0 6px 0; font-size:14px'>Apartament cu 2 approx. mere, Ciocana, Chișinău, Chișinău mun. <span style='font-size:11px; color:#666; font-weight:400'>(Apartament cu 2 camere, Ciocana, Chișinău, Chișinău mun.)</span></h3><div><a target='_blank' rel='noreferrer' href='https://999.md/ro/103797011'><b>Ad</b></a></div><div style='margin-top:6px'><a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=47.055,28.889'>Google Maps</a> | <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=47.055,28.889'>Street View</a></div></div>"}, {"rank": 24, "lat": 47.055, "lng": 28.889, "sector": null, "pin": "unconfirmed", "tooltip": "<div style='font-size:11px;line-height:1.1'><b>3 rooms · outdoor space</b></div>", "popup": "<div class='popup'><h3 style='margin:0 0 6px 0; font-size:14px'>Apartament cu 3 approx. mere, Ciocana, Chișinău, Chișinău mun. <span style='font-size:11px; color:#666; font-weight:400'>(Apartament cu 3 camere, Ciocana, Chișinău, Chișinău mun.)</span></h3><div><a target='_blank' rel='noreferrer' href='https://999.md/ro/103766843'><b>Ad</b></a></div><div style='margin-top:6px'><a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=47.055,28.889'>Google Maps</a> | <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=47.055,28.889'>Street View</a></div></div>"}, {"rank": 25, "lat": 47.055, "lng": 28.889, "sector": null, "pin": "unconfirmed", "tooltip": "<div style='font-size:11px;line-height:1.1'><b>outdoor space</b></div>", "popup": "<div class='popup'><h3 style='margin:0 0 6px 0; font-size:14px'>Apartament cu 1 approx. meră, Ciocana, Chișinău, Chișinău mun. <span style='font-size:11px; color:#666; font-weight:400'>(Apartament cu 1 cameră, Ciocana, Chișinău, Chișinău mun.)</span></h3><div><a target='_blank' rel='noreferrer' href='https://999.md/ro/103387250'><b>Ad</b></a></div><div style='margin-top:6px'><a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=47.055,28.889'>Google Maps</a> | <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=47.055,28.889'>Street View</a></div></div>"}, {"rank": 26, "lat": 47.055, "lng": 28.889, "sector": null, "pin": "unconfirmed", "tooltip": "<div style='font-size:11px;line-height:1.1'><b>3 rooms · outdoor space</b></div>", "popup": "<div class='popup'><h3 style='margin:0 0 6px 0; font-size:14px'>Apartament cu 3 approx. mere, Ciocana, Chișinău, Chișinău mun. <span style='font-size:11px; color:#666; font-weight:400'>(Apartament cu 3 camere, Ciocana, Chișinău, Chișinău mun.)</span></h3><div><a target='_blank' rel='noreferrer' href='https://999.md/ro/102644224'><b>Ad</b></a></div><div style='margin-top:6px'><a target='_blank' rel='noreferrer' href='https://www.google.com/maps/search/?api=1&amp;query=47.055,28.889'>Google Maps</a> | <a target='_blank' rel='noreferrer' href='https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=47.055,28.889'>Street View</a></div></div>"}];
+    const bounds = L.latLngBounds();
+    const markersByRank = new Map();
+    const pointsByRank = new Map();
+    let highlight = null;
+
+    function getCard(rank) {
+      return document.querySelector(".card[data-rank='" + rank + "']");
+    }
+
+    // Overlay styling helpers (gradient by intensity)
+    function rgba(r,g,b,a){ return 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')'; }
+    function colorFor(kind, t){
+      t = Math.max(0, Math.min(1, t||0));
+      if(kind==='quiet_lively'){
+        const r = Math.round(40 + 20*t);
+        const g = Math.round(160 + 70*t);
+        const b = Math.round(120 + 40*t);
+        return rgba(r,g,b, 0.12 + 0.28*t);
+      }
+      if(kind==='noisy_lively'){
+        const r = Math.round(220 + 20*t);
+        const g = Math.round(90 + 30*(1-t));
+        const b = Math.round(40 + 20*(1-t));
+        return rgba(r,g,b, 0.10 + 0.30*t);
+      }
+      const r = Math.round(120 + 40*t);
+      const g = Math.round(80 + 20*t);
+      const b = Math.round(200 + 40*t);
+      return rgba(r,g,b, 0.08 + 0.24*t);
+    }
+
+    // Overlays: loaded asynchronously from separate GeoJSON files
+    const overlaySpecs = {
+      quiet_lively: { url: 'overlay_quiet_lively.geojson', label: 'Quiet lively', defaultOn: true },
+      noisy_lively: { url: 'overlay_noisy_lively.geojson', label: 'Noisy lively', defaultOn: true },
+      touristic: { url: 'overlay_touristic.geojson', label: 'Touristic', defaultOn: true },
+    };
+    const overlayLayers = { quiet_lively: null, noisy_lively: null, touristic: null };
+
+    function setOverlay(kind, on){
+      const layer = overlayLayers[kind];
+      if(!layer) return;
+      try { if(on) layer.addTo(map); else map.removeLayer(layer); } catch(e) {}
+    }
+
+    function setOverlayStatus(kind, text){
+      const el = document.getElementById(kind === 'quiet_lively' ? 'ov_status_quiet' : kind === 'noisy_lively' ? 'ov_status_noisy' : 'ov_status_tour');
+      if(el) el.textContent = text || '';
+    }
+
+    async function loadOverlay(kind, attempt){
+      attempt = attempt || 1;
+      const spec = overlaySpecs[kind];
+      if(!spec) return;
+      try {
+        setOverlayStatus(kind, attempt === 1 ? 'loading…' : ('retry ' + attempt + '…'));
+        const resp = await fetch(spec.url, {cache: 'no-store'});
+        if(!resp.ok) {
+          setOverlayStatus(kind, 'not available (' + resp.status + ')');
+          if(attempt < 6) setTimeout(() => loadOverlay(kind, attempt + 1), 2000 * attempt);
+          return;
+        }
+        const gj = await resp.json();
+        if(!gj || !gj.features) {
+          setOverlayStatus(kind, 'invalid');
+          return;
+        }
+        const minDisplay = (kind === 'quiet_lively') ? 3 : (kind === 'noisy_lively') ? 2 : 2;
+        const layer = L.geoJSON(gj, {
+          pane: 'gridPane',
+          renderer: overlayRenderer,
+          filter: (feature) => {
+            const c = (feature && feature.properties) ? Number(feature.properties.count || 0) : 0;
+            return c >= minDisplay;
+          },
+          style: (feature) => {
+            const t = (feature && feature.properties) ? feature.properties.intensity : 0;
+            return { color: 'rgba(0,0,0,0)', weight: 0, fillColor: colorFor(kind, t), fillOpacity: 1.0 };
+          },
+          interactive: false,
+        });
+        overlayLayers[kind] = layer;
+        setOverlayStatus(kind, gj.features.length.toLocaleString() + ' cells');
+
+        const cb = document.getElementById(kind === 'quiet_lively' ? 'ov_quiet' : kind === 'noisy_lively' ? 'ov_noisy' : 'ov_tour');
+        const wantOn = cb ? cb.checked : !!spec.defaultOn;
+        if(wantOn) layer.addTo(map);
+      } catch(e) {
+        setOverlayStatus(kind, 'error');
+      }
+    }
+
+    // Sector overlay (Chișinău): fetch Overpass JSON and convert client-side via osmtogeojson.
+    async function loadSectorBorders(){
+      try{
+        const resp = await fetch('chisinau_sectors.overpass.json', {cache:'force-cache'});
+        if(!resp.ok) return;
+        const over = await resp.json();
+        if(!over || !over.elements || !over.elements.length) return;
+        if(typeof osmtogeojson !== 'function') return;
+        const gj = osmtogeojson(over);
+        if(!gj || !gj.features) return;
+
+        const baseStyle = { color: 'rgba(17,24,39,0.45)', weight: 1, fillOpacity: 0, opacity: 0.75 };
+        const hiStyle   = { color: 'rgba(17,24,39,0.95)', weight: 3, fillOpacity: 0, opacity: 1.0 };
+
+        const layerByName = {};
+        const featByName = {};
+        let highlighted = new Set();
+
+        const layer = L.geoJSON(gj, {
+          pane: 'sectorPane',
+          style: () => baseStyle,
+          interactive: false,
+          onEachFeature: (feat, lyr) => {
+            const p = feat && feat.properties ? feat.properties : {};
+            const nm = (p['name:ro'] || p['name'] || p['name:en'] || '').trim();
+            if(nm){
+              layerByName[nm] = lyr;
+              featByName[nm] = feat;
+            }
+          }
+        }).addTo(map);
+
+        function setSectorStyle(name, on){
+          const lyr = layerByName[String(name)];
+          if(!lyr) return;
+          try{ lyr.setStyle(on ? hiStyle : baseStyle); } catch(e) {}
+        }
+
+        function setHighlighted(names){
+          highlighted.forEach(n => { if(!names.includes(n)) setSectorStyle(n, false); });
+          names.forEach(n => setSectorStyle(n, true));
+          highlighted = new Set(names);
+        }
+
+        window.__sectorHighlight = { setHighlighted };
+      } catch(e) {}
+    }
+
+    loadSectorBorders();
+    loadOverlay('quiet_lively', 1);
+    loadOverlay('noisy_lively', 1);
+    loadOverlay('touristic', 1);
+
+    function selectCard(rank) {
+      document.querySelectorAll('.card.selected').forEach(el => el.classList.remove('selected'));
+      const el = getCard(rank);
+      if (el) el.classList.add('selected');
+    }
+
+    function scrollToCard(rank) {
+      const el = getCard(rank);
+      if (!el) return;
+      const headerEl = document.getElementById('leftHeader');
+      const top = Math.max(0, el.offsetTop - (headerEl ? headerEl.getBoundingClientRect().height : 0) - 12);
+      document.getElementById('leftPane').scrollTo({behavior: 'smooth', top: top});
+    }
+
+    function focusListing(rank) {
+      const m = markersByRank.get(String(rank));
+      if (!m) return;
+      const ll = m.getLatLng();
+      map.panTo(ll, {animate:true});
+      m.openPopup();
+      if (highlight) { try { map.removeLayer(highlight); } catch(e) {} }
+      highlight = L.circleMarker(ll, {radius: 14, color:'#2563eb', weight: 3, fillColor:'#60a5fa', fillOpacity: 0.15, pane: 'pinPane'}).addTo(map);
+
+      // highlight sector if known
+      try {
+        const p = pointsByRank.get(String(rank));
+        const sh = window.__sectorHighlight;
+        if(p && sh && p.sector){ sh.setHighlighted([String(p.sector)]); }
+      } catch(e) {}
+
+      selectCard(rank);
+      scrollToCard(rank);
+    }
+
+    points.forEach((p) => {
+      pointsByRank.set(String(p.rank), p);
+      const ll = L.latLng(p.lat, p.lng);
+      bounds.extend(ll);
+
+      const pinStyles = {
+        confirmed:   {color:'#1d4ed8', fillColor:'#3b82f6', fillOpacity:0.85},
+        unconfirmed: {color:'#a16207', fillColor:'#fbbf24', fillOpacity:0.85},
+        mismatch:    {color:'#b91c1c', fillColor:'#ef4444', fillOpacity:0.85},
+      };
+      const sty = pinStyles[p.pin] || pinStyles.unconfirmed;
+
+      const m = L.circleMarker(ll, {radius: 8, weight: 2, ...sty, pane: 'pinPane'}).addTo(map);
+      markersByRank.set(String(p.rank), m);
+      if (p.tooltip) m.bindTooltip(p.tooltip, {direction:'top', opacity:0.97, sticky:true, pane:'pinTooltipPane'});
+      if (p.popup) m.bindPopup(p.popup, {maxWidth: 420});
+
+      function _pinHover(on){
+        try{
+          const sh = window.__sectorHighlight;
+          if(!sh) return;
+          if(!on){ sh.setHighlighted([]); return; }
+          if(p.sector){ sh.setHighlighted([String(p.sector)]); }
+        } catch(e) {}
+      }
+      m.on('mouseover', ()=>_pinHover(true));
+      m.on('mouseout', ()=>_pinHover(false));
+      m.on('tooltipopen', ()=>_pinHover(true));
+      m.on('tooltipclose', ()=>_pinHover(false));
+
+      m.on('click', () => {
+        try { m.openPopup(); } catch(e) {}
+        selectCard(p.rank);
+        scrollToCard(p.rank);
+        map.panTo(ll, {animate:true});
+        if (highlight) { try { map.removeLayer(highlight); } catch(e) {} }
+        highlight = L.circleMarker(ll, {radius: 14, color:'#111827', weight: 3, fillColor:'#93c5fd', fillOpacity: 0.15, pane: 'pinPane'}).addTo(map);
+      });
+    });
+
+    document.querySelectorAll('.card[data-rank]').forEach(el => {
+      const rank = el.getAttribute('data-rank');
+      el.addEventListener('click', () => focusListing(rank));
+      el.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); focusListing(rank); }
+      });
+    });
+
+    // Filters
+    const filterParking = document.getElementById('filterParking');
+    const filterTerrace = document.getElementById('filterTerrace');
+    const filterLively = document.getElementById('filterLively');
+
+    function applyFilters() {
+      const wantParking = !!(filterParking && filterParking.checked);
+      const wantTerrace = !!(filterTerrace && filterTerrace.checked);
+      const wantLively = !!(filterLively && filterLively.checked);
+
+      document.querySelectorAll('.card[data-rank]').forEach(el => {
+        const rank = el.getAttribute('data-rank');
+        const hasP = el.getAttribute('data-has-parking') === 'true';
+        const hasT = el.getAttribute('data-has-terrace') === 'true';
+        const lively = el.getAttribute('data-lively') === 'true';
+
+        const ok = (!wantParking || hasP) && (!wantTerrace || hasT) && (!wantLively || lively);
+        el.style.display = ok ? '' : 'none';
+
+        const m = markersByRank.get(String(rank));
+        if (m) {
+          if (ok) { try { m.addTo(map); } catch(e) {} }
+          else { try { map.removeLayer(m); } catch(e) {} }
+        }
+      });
+    }
+
+    if (filterParking) filterParking.addEventListener('change', applyFilters);
+    if (filterTerrace) filterTerrace.addEventListener('change', applyFilters);
+    if (filterLively) filterLively.addEventListener('change', applyFilters);
+
+    // Wire overlay toggles
+    const ovQuiet = document.getElementById('ov_quiet');
+    const ovNoisy = document.getElementById('ov_noisy');
+    const ovTour = document.getElementById('ov_tour');
+    if(ovQuiet) { ovQuiet.addEventListener('change', (e)=>setOverlay('quiet_lively', e.target.checked)); }
+    if(ovNoisy) { ovNoisy.addEventListener('change', (e)=>setOverlay('noisy_lively', e.target.checked)); }
+    if(ovTour)  { ovTour.addEventListener('change', (e)=>setOverlay('touristic', e.target.checked)); }
+
+    // Initial filter application
+    applyFilters();
+
+    if (points.length) map.fitBounds(bounds.pad(0.15));
+    else map.setView([47.0246, 28.8329], 12);
+    
+  </script>
+</body>
+</html>
