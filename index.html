@@ -57,6 +57,7 @@
             <div style='font-weight:700'>Chișinău apartment report</div>
             <div style='color:#444; font-size:12px; margin-top:2px'>Listings (left) + Leaflet map (right). Click a listing to zoom/highlight the marker; click a marker to jump to the listing.</div>
           </div>
+          <button class='toggleBtn' id='hidePanelBtn' title='Hide the listings panel'>Hide panel</button>
         </div>
         <div style='margin-top:8px; font-size:12px; color:#333'>
           <b>What you’re seeing:</b> apartments for purchase (source-specific). Sector borders are approximate OSM admin relations.
@@ -977,6 +978,7 @@
       </div>
     </div>
     <div class='right'>
+      <button class='toggleBtn' id='showPanelBtn' title='Show the listings panel' style='position:absolute; top:10px; left:10px; z-index:1000; display:none;'>Show panel</button>
       <div id='map'></div>
     </div>
   </div>
@@ -1272,6 +1274,21 @@
 
     // Initial filter application
     applyFilters();
+
+    // Side panel show/hide (Vienna parity)
+    const leftPane = document.getElementById('leftPane');
+    const hideBtn = document.getElementById('hidePanelBtn');
+    const showBtn = document.getElementById('showPanelBtn');
+    function setPanelVisible(on){
+      if(!leftPane) return;
+      leftPane.style.display = on ? '' : 'none';
+      if(showBtn) showBtn.style.display = on ? 'none' : '';
+      if(hideBtn) hideBtn.style.display = on ? '' : 'none';
+      // Leaflet needs a resize tick after layout changes
+      try { setTimeout(()=>map.invalidateSize(), 50); } catch(e) {}
+    }
+    if(hideBtn) hideBtn.addEventListener('click', ()=>setPanelVisible(false));
+    if(showBtn) showBtn.addEventListener('click', ()=>setPanelVisible(true));
 
     if (points.length) map.fitBounds(bounds.pad(0.15));
     else map.setView([47.0246, 28.8329], 12);
