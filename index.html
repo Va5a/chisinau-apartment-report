@@ -6450,7 +6450,14 @@
 
   <script>
   
-    const map = L.map('map', { preferCanvas: true });
+    // Leaflet map
+    // Note: trackpads can emit large wheel deltas; tune wheelPxPerZoomLevel to avoid “jumping” multiple zoom steps.
+    const map = L.map('map', {
+      preferCanvas: true,
+      zoomDelta: 1,
+      zoomSnap: 1,
+      wheelPxPerZoomLevel: 120,
+    });
 
     // Panes: ensure overlays never block marker clicks.
     map.createPane('sectorPane');
