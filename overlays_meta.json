@@ -1,0 +1,68 @@
+{
+  "generated_at": "2026-03-19T13:47:32+0100",
+  "cell_m": 100.0,
+  "overpass_endpoints": [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.nchc.org.tw/api/interpreter"
+  ],
+  "area_name": "Chișinău",
+  "layers": {
+    "quiet_lively": {
+      "description": "Quiet lively: restaurants + cafes (amenity=restaurant|cafe).",
+      "selectors": [
+        {
+          "amenity": "restaurant"
+        },
+        {
+          "amenity": "cafe"
+        }
+      ],
+      "pois": 779,
+      "cells": 628,
+      "out": "out/overlay_quiet_lively.geojson"
+    },
+    "noisy_lively": {
+      "description": "Noisy lively: bars + pubs + nightclubs (amenity=bar|pub|nightclub).",
+      "selectors": [
+        {
+          "amenity": "bar"
+        },
+        {
+          "amenity": "pub"
+        },
+        {
+          "amenity": "nightclub"
+        }
+      ],
+      "pois": 189,
+      "cells": 173,
+      "out": "out/overlay_noisy_lively.geojson"
+    },
+    "touristic": {
+      "description": "Touristic: attractions + museums + hotels/hostels (tourism=attraction|museum|hotel|hostel). Informational only.",
+      "selectors": [
+        {
+          "tourism": "attraction"
+        },
+        {
+          "tourism": "museum"
+        },
+        {
+          "tourism": "hotel"
+        },
+        {
+          "tourism": "hostel"
+        }
+      ],
+      "pois": 177,
+      "cells": 158,
+      "out": "out/overlay_touristic.geojson"
+    }
+  },
+  "notes": [
+    "These overlays are built from OpenStreetMap POI tags via Overpass.",
+    "Intensity is log-scaled per layer (0..1) based on max cell count.",
+    "Intended rebuild cadence: quarterly."
+  ]
+}
