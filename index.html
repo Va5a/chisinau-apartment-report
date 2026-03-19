@@ -978,7 +978,7 @@
       </div>
     </div>
     <div class='right'>
-      <button class='toggleBtn' id='showPanelBtn' title='Show the listings panel' style='position:absolute; top:10px; left:10px; z-index:1000; display:none;'>Show panel</button>
+      <button class='toggleBtn' id='showPanelBtn' title='Show the listings panel' style='position:absolute; top:56px; left:10px; z-index:2000; display:none;'>Show panel</button>
       <div id='map'></div>
     </div>
   </div>
@@ -1285,7 +1285,12 @@
       if(showBtn) showBtn.style.display = on ? 'none' : '';
       if(hideBtn) hideBtn.style.display = on ? '' : 'none';
       // Leaflet needs a resize tick after layout changes
-      try { setTimeout(()=>map.invalidateSize(), 50); } catch(e) {}
+      try {
+        // multiple ticks: some browsers need >1 frame after flexbox changes
+        setTimeout(()=>map.invalidateSize(), 50);
+        setTimeout(()=>map.invalidateSize(), 250);
+        setTimeout(()=>map.invalidateSize(), 800);
+      } catch(e) {}
     }
     if(hideBtn) hideBtn.addEventListener('click', ()=>setPanelVisible(false));
     if(showBtn) showBtn.addEventListener('click', ()=>setPanelVisible(true));
