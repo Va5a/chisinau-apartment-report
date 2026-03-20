@@ -46,11 +46,21 @@
     .facts { margin: 8px 0; padding: 8px 10px; border: 1px solid #e5e7eb; border-radius: 10px; background: #fafafa; }
     .factsLabel { font-size: 12px; color:#111827; margin-bottom: 6px; }
     .facts ul { margin: 0 0 0 18px; padding: 0; }
+
+    /* Quality banner (Policy B: publish best-effort but never silently) */
+    .qualityBanner { padding: 10px 14px; border-bottom: 1px solid #eee; font-size: 12px; }
+    .qualityBanner.bad { background: #fff7ed; color: #7c2d12; }
+    .qualityBanner.good { background: #f0fdf4; color: #14532d; }
+    .qualityBanner b { font-weight: 700; }
+    .qualityBanner .small { color: inherit; opacity: 0.85; }
+    .qualityBanner details { margin-top: 6px; }
+    .qualityBanner code { font-size: 11px; }
   </style>
 </head>
 <body>
   <div class='wrap'>
     <div class='left' id='leftPane'>
+      <div class='qualityBanner good'><b>Quality status:</b> PASS <span class='small'>(failures: 0, warnings: 0)</span></div>
       <div class='leftHeader' id='leftHeader'>
         <div class='leftHeaderTop'>
           <div>
